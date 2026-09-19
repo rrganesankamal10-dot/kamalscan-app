@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "docx": "^9.7.1",
+    "gifenc": "^1.0.3",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.45.0",
     "pdfjs-dist": "^6.3.289",
