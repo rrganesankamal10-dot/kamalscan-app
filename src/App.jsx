@@ -5,7 +5,7 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import Tesseract from 'tesseract.js'
 import { Document, Packer, Paragraph, ImageRun } from 'docx'
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
-import { FileText, UploadCloud, Camera, X, ScanText, Copy, Loader2, RotateCw, ArrowUp, ArrowDown, Download, Crop, Eye, FileSearch, LayoutGrid, Check } from 'lucide-react'
+import { FileText, UploadCloud, Camera, X, ScanText, Copy, Loader2, RotateCw, ArrowUp, ArrowDown, Download, Crop, Eye, FileSearch, LayoutGrid, Check, Info, Lock, Zap, Cpu } from 'lucide-react'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -44,8 +44,6 @@ const blobToDataUrl = (blob) =>
     reader.readAsDataURL(blob)
   })
 
-// Simple camera shutter beep using the Web Audio API — no external sound file
-// needed, so it can never fail to load or 404.
 function playShutterSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -59,9 +57,7 @@ function playShutterSound() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12)
     osc.start()
     osc.stop(ctx.currentTime + 0.12)
-  } catch (err) {
-    // Silently ignore — some browsers block audio until user interaction elsewhere on the page
-  }
+  } catch (err) {}
 }
 
 async function rotateDataUrl(dataUrl, degrees) {
@@ -150,7 +146,6 @@ const renderPdfPagesToImages = async (file) => {
   return images
 }
 
-// ---------- Perspective crop math ----------
 function solveLinearSystem(A, b) {
   const n = A.length
   const M = A.map((row, i) => [...row, b[i]])
@@ -233,7 +228,6 @@ async function warpPerspective(imgSrc, corners, outWidth, outHeight) {
   return outCanvas.toDataURL('image/png')
 }
 
-// ---------- Crop modal ----------
 function CropModal({ item, onCancel, onApply }) {
   const containerRef = useRef(null)
   const [natSize, setNatSize] = useState({ w: 0, h: 0 })
@@ -315,8 +309,6 @@ function CropModal({ item, onCancel, onApply }) {
   )
 }
 
-// ---------- Preview modal (fixed: unique key per page forces reliable re-render,
-// plus a thumbnail strip so you can jump straight to any page and visually confirm it changed) ----------
 function PreviewModal({ pages, onClose }) {
   const [index, setIndex] = useState(0)
   const page = pages[Math.min(index, pages.length - 1)]
@@ -328,12 +320,9 @@ function PreviewModal({ pages, onClose }) {
           <h3 className="font-semibold text-slate-800">Preview — Page {index + 1} of {pages.length}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-red-500"><X size={18} /></button>
         </div>
-
         <div className="p-4 overflow-y-auto flex-1 flex items-center justify-center bg-slate-50">
           <img key={page.id} src={page.previewUrl} alt={page.name} className="max-w-full max-h-[55vh] rounded-lg shadow" />
         </div>
-
-        {/* Thumbnail strip — tap any page directly, and it visually proves navigation works */}
         <div className="flex gap-2 px-4 overflow-x-auto flex-shrink-0 pb-2">
           {pages.map((p, i) => (
             <button
@@ -346,7 +335,6 @@ function PreviewModal({ pages, onClose }) {
             </button>
           ))}
         </div>
-
         <div className="flex gap-2 p-4 pt-2 flex-shrink-0 border-t border-slate-100">
           <button onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index === 0} className="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-medium">Previous</button>
           <button onClick={() => setIndex((i) => Math.min(pages.length - 1, i + 1))} disabled={index === pages.length - 1} className="flex-1 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white font-medium">Next</button>
@@ -356,7 +344,6 @@ function PreviewModal({ pages, onClose }) {
   )
 }
 
-// ---------- Batch OCR modal ----------
 function BatchOcrModal({ text, onClose, onCopy }) {
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -377,7 +364,6 @@ function BatchOcrModal({ text, onClose, onCopy }) {
   )
 }
 
-// ---------- Collage modal ----------
 function CollageModal({ queue, onCancel, onGenerate }) {
   const [selectedIds, setSelectedIds] = useState([])
   const [layout, setLayout] = useState('2x2')
@@ -432,7 +418,6 @@ function CollageModal({ queue, onCancel, onGenerate }) {
           <h3 className="font-semibold text-slate-800 mb-1">Create Collage</h3>
           <p className="text-xs text-slate-500">Pick images and a grid layout.</p>
         </div>
-
         <div className="px-5 flex-shrink-0">
           <div className="flex gap-2 mb-3">
             {layouts.map((l) => (
@@ -446,7 +431,6 @@ function CollageModal({ queue, onCancel, onGenerate }) {
             ))}
           </div>
         </div>
-
         <div className="px-5 overflow-y-auto flex-1">
           <div className="grid grid-cols-3 gap-2">
             {queue.map((item) => (
@@ -466,7 +450,6 @@ function CollageModal({ queue, onCancel, onGenerate }) {
             ))}
           </div>
         </div>
-
         <div className="flex gap-2 p-5 pt-3 flex-shrink-0 border-t border-slate-100">
           <button onClick={onCancel} className="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Cancel</button>
           <button onClick={handleGenerate} disabled={generating || selectedIds.length === 0} className="flex-1 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-medium flex items-center justify-center gap-2">
@@ -493,6 +476,7 @@ function App() {
   const [showCollage, setShowCollage] = useState(false)
   const [batchOcrText, setBatchOcrText] = useState(null)
   const [batchOcrRunning, setBatchOcrRunning] = useState(false)
+  const [ocrEverUsed, setOcrEverUsed] = useState(false)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -510,6 +494,18 @@ function App() {
   useEffect(() => {
     return () => { if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop()) }
   }, [])
+
+  // Spacebar captures a photo when the camera is active — a small but real UX touch.
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.code === 'Space' && cameraActive) {
+        e.preventDefault()
+        captureFrame()
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [cameraActive])
 
   const makeItem = (previewUrl, name, kind, originalSize) => ({
     id: crypto.randomUUID(), name, kind, previewUrl, originalSize,
@@ -615,6 +611,7 @@ function App() {
   const captureFrame = () => {
     playShutterSound()
     const video = videoRef.current
+    if (!video || !video.videoWidth) return
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
@@ -628,6 +625,10 @@ function App() {
   const runOcr = async (id) => {
     const item = queue.find((f) => f.id === id)
     if (!item) return
+    if (!ocrEverUsed) {
+      addToast('First run downloads the OCR engine (~2MB) — just once per session')
+      setOcrEverUsed(true)
+    }
     updateItem(id, { ocrLoading: true, ocrText: '' })
     try {
       const result = await Tesseract.recognize(item.previewUrl, 'eng')
@@ -639,6 +640,10 @@ function App() {
 
   const runBatchOcr = async () => {
     if (queue.length === 0) return
+    if (!ocrEverUsed) {
+      addToast('First run downloads the OCR engine (~2MB) — just once per session')
+      setOcrEverUsed(true)
+    }
     setBatchOcrRunning(true)
     let combined = ''
     for (let i = 0; i < queue.length; i++) {
@@ -671,7 +676,7 @@ function App() {
     } else if (item.downloadFormat === 'docx') {
       triggerDownload(await convertToDocxBlob(item.previewUrl), `${base}.docx`)
     }
-    addToast(`Thank you for downloading ${base}.${item.downloadFormat}!`)
+    addToast(`Thank you for downloading ${base}.${item.downloadFormat}! Check the top-right corner next time 🙂`)
   }
 
   const processAll = async () => {
@@ -760,6 +765,7 @@ function App() {
                   <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>Live
                 </div>
                 <div className="absolute inset-8 border-2 border-dashed border-white/70 rounded-lg pointer-events-none"></div>
+                <div className="absolute bottom-3 right-3 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full">Press Space to capture</div>
               </>
             )}
           </div>
@@ -854,6 +860,25 @@ function App() {
             <p>Combined {queue.length} file(s): {formatBytes(summary.totalOriginal)} → {formatBytes(summary.totalCompressed)} (<span className="text-green-600 font-semibold">{summary.savedPercent}% saved</span>)</p>
           </section>
         )}
+
+        {/* About / How This Works — helps a recruiter understand what they're looking at */}
+        <section className="bg-white rounded-2xl shadow-md p-6">
+          <h2 className="font-semibold text-lg mb-4 text-slate-800 flex items-center gap-2"><Info size={20} className="text-sky-600" /> How This Works</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-slate-600">
+            <div className="flex gap-3">
+              <Lock size={20} className="text-sky-600 flex-shrink-0 mt-0.5" />
+              <p><b className="text-slate-800">100% client-side.</b> Every file stays in your browser — nothing is uploaded to a server, so it works offline once the page has loaded.</p>
+            </div>
+            <div className="flex gap-3">
+              <Cpu size={20} className="text-sky-600 flex-shrink-0 mt-0.5" />
+              <p><b className="text-slate-800">Real perspective correction.</b> The crop tool solves an 8-parameter homography matrix to straighten photographed documents, the same math behind professional scanner apps.</p>
+            </div>
+            <div className="flex gap-3">
+              <Zap size={20} className="text-sky-600 flex-shrink-0 mt-0.5" />
+              <p><b className="text-slate-800">On-device OCR &amp; compression.</b> Text extraction and image compression both run locally using WebAssembly and the Canvas API — no round trip to any backend.</p>
+            </div>
+          </div>
+        </section>
       </main>
 
       {queue.length > 0 && (
@@ -892,7 +917,7 @@ function App() {
 
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {toasts.map((t) => (
-          <div key={t.id} className={`px-4 py-3 rounded-lg shadow-md text-sm font-medium text-white ${t.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>{t.message}</div>
+          <div key={t.id} className={`px-4 py-3 rounded-lg shadow-md text-sm font-medium text-white max-w-xs ${t.type === 'error' ? 'bg-red-500' : 'bg-slate-800'}`}>{t.message}</div>
         ))}
       </div>
     </div>
