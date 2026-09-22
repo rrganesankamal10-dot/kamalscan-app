@@ -477,6 +477,7 @@ function App() {
   const [batchOcrText, setBatchOcrText] = useState(null)
   const [batchOcrRunning, setBatchOcrRunning] = useState(false)
   const [ocrEverUsed, setOcrEverUsed] = useState(false)
+  const [videoAspect, setVideoAspect] = useState(null)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -495,7 +496,6 @@ function App() {
     return () => { if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop()) }
   }, [])
 
-  // Spacebar captures a photo when the camera is active — a small but real UX touch.
   useEffect(() => {
     const handleKey = (e) => {
       if (e.code === 'Space' && cameraActive) {
@@ -676,7 +676,7 @@ function App() {
     } else if (item.downloadFormat === 'docx') {
       triggerDownload(await convertToDocxBlob(item.previewUrl), `${base}.docx`)
     }
-    addToast(`Thank you for downloading ${base}.${item.downloadFormat}! Check the top-right corner next time 🙂`)
+    addToast(`Thank you for downloading ${base}.${item.downloadFormat}!`)
   }
 
   const processAll = async () => {
@@ -710,19 +710,24 @@ function App() {
   const cropItem = queue.find((f) => f.id === cropItemId)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-100 via-cyan-50 to-blue-100 text-slate-800 pb-28">
-      <header className="max-w-5xl mx-auto px-6 pt-10 pb-6">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-sky-100 via-cyan-50 to-blue-100 text-slate-800 pb-28">
+      {/* Soft decorative blobs behind the header — the touch that separates a premium-feeling
+          landing page from a flat one, without adding any real visual noise */}
+      <div className="absolute -top-20 -left-20 w-80 h-80 bg-sky-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 pointer-events-none"></div>
+      <div className="absolute top-10 right-0 w-96 h-96 bg-cyan-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 pointer-events-none"></div>
+
+      <header className="relative max-w-5xl mx-auto px-6 pt-10 pb-6">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <div className="bg-sky-600 text-white p-2 rounded-xl shadow-sm"><FileText size={22} /></div>
-            <h1 className="text-2xl font-bold text-slate-900">KamalScan</h1>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-700 to-cyan-600 bg-clip-text text-transparent">KamalScan</h1>
           </div>
           <span className="text-xs font-semibold bg-sky-100 text-sky-700 px-3 py-1.5 rounded-full">Client-Side Secure</span>
         </div>
         <p className="text-slate-500 text-sm mt-2">Scan, convert, compress, and extract text — 100% locally in your browser.</p>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 space-y-6">
+      <main className="relative max-w-5xl mx-auto px-6 space-y-6">
         <section
           onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
@@ -730,7 +735,7 @@ function App() {
           className={`rounded-2xl border-2 border-dashed p-12 text-center transition-colors shadow-sm ${dragOver ? 'border-sky-400 bg-sky-50' : 'border-slate-300 bg-white'}`}
         >
           <div className="flex justify-center mb-4"><div className="bg-sky-100 text-sky-600 p-4 rounded-full"><UploadCloud size={32} /></div></div>
-          <label className="inline-block cursor-pointer bg-sky-600 hover:bg-sky-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors focus-within:ring-2 focus-within:ring-sky-400 shadow-sm">
+          <label className="inline-block cursor-pointer bg-sky-600 hover:bg-sky-700 text-white font-semibold px-6 py-3 rounded-lg transition-all hover:scale-[1.03] focus-within:ring-2 focus-within:ring-sky-400 shadow-sm">
             Browse Files
             <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
           </label>
@@ -751,14 +756,23 @@ function App() {
 
         <section className="bg-white rounded-2xl shadow-md p-6">
           <h2 className="font-semibold text-lg mb-3 flex items-center gap-2 text-slate-800"><Camera size={20} className="text-sky-600" /> Scanner</h2>
-          <div className="relative w-full max-w-2xl mx-auto aspect-[3/4] sm:aspect-video rounded-xl overflow-hidden bg-slate-900 border border-slate-200 flex items-center justify-center">
+          <div
+            className="relative w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-slate-900 border border-slate-200 flex items-center justify-center"
+            style={{ aspectRatio: videoAspect || '3 / 4' }}
+          >
             {!cameraActive && (
               <div className="text-center text-slate-400 px-6">
                 <Camera size={56} className="mx-auto mb-2 opacity-60" />
                 <p className="text-sm">Camera preview inactive. Click "Initialize Scanner" to begin.</p>
               </div>
             )}
-            <video ref={videoRef} autoPlay playsInline className={`absolute inset-0 w-full h-full object-cover ${cameraActive ? 'block' : 'hidden'}`} />
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)}
+              className={`absolute inset-0 w-full h-full object-contain ${cameraActive ? 'block' : 'hidden'}`}
+            />
             {cameraActive && (
               <>
                 <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
@@ -773,7 +787,7 @@ function App() {
             <button onClick={cameraActive ? stopCamera : startCamera} className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors">
               {cameraActive ? 'Stop Camera' : 'Initialize Scanner'}
             </button>
-            <button onClick={captureFrame} disabled={!cameraActive} className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center gap-2">
+            <button onClick={captureFrame} disabled={!cameraActive} className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-all hover:scale-[1.03] flex items-center gap-2">
               <Camera size={16} /> Capture Document Frame
             </button>
           </div>
@@ -861,7 +875,6 @@ function App() {
           </section>
         )}
 
-        {/* About / How This Works — helps a recruiter understand what they're looking at */}
         <section className="bg-white rounded-2xl shadow-md p-6">
           <h2 className="font-semibold text-lg mb-4 text-slate-800 flex items-center gap-2"><Info size={20} className="text-sky-600" /> How This Works</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-slate-600">
@@ -882,7 +895,7 @@ function App() {
       </main>
 
       {queue.length > 0 && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-2xl">
+        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-2xl z-40">
           <div className="max-w-5xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex gap-4 items-center text-sm text-slate-600">
               <div><span className="font-semibold text-slate-900">{queue.length}</span> files</div>
@@ -890,7 +903,7 @@ function App() {
               {summary && <div><span className="font-semibold text-green-600">{summary.savedPercent}%</span> saved</div>}
               <input type="text" value={pdfFilename} onChange={(e) => setPdfFilename(e.target.value)} placeholder="filename" className="text-xs border border-slate-200 rounded-md px-2 py-1.5 w-28 focus:outline-none focus:ring-2 focus:ring-sky-300" />
             </div>
-            <button onClick={processAll} disabled={processing} className="px-6 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-semibold flex items-center gap-2">
+            <button onClick={processAll} disabled={processing} className="px-6 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-semibold flex items-center gap-2 transition-all hover:scale-[1.03]">
               {processing && <Loader2 size={16} className="animate-spin" />}
               {processing ? 'Processing...' : 'Combine All → PDF'}
             </button>
