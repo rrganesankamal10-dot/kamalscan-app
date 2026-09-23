@@ -643,10 +643,14 @@ function App() {
   // Professional PDF Export Settings
   const [addPageNumbers, setAddPageNumbers] = useState(true)
 
-  // Force default Light Mode (clean white cards) unless dark theme is explicitly requested
-  const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem('theme') === 'dark'
-  })
+  // ALWAYS default to 100% Light Mode (Clean White Cards) across ALL devices
+  const [darkMode, setDarkMode] = useState(false)
+
+  // Clear any old stored dark state on initial load so all devices load white by default
+  useEffect(() => {
+    localStorage.removeItem('theme')
+    document.documentElement.classList.remove('dark')
+  }, [])
 
   // PWA Install Prompt state
   const [installPrompt, setInstallPrompt] = useState(null)
@@ -657,10 +661,8 @@ function App() {
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
     } else {
       document.documentElement.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
     }
   }, [darkMode])
 
@@ -995,11 +997,7 @@ function App() {
               <ShieldCheck size={14} className="text-emerald-600 dark:text-emerald-400" /> 100% On-Device Privacy
             </span>
             <button
-              onClick={() => {
-                const next = !darkMode
-                setDarkMode(next)
-                if (!next) localStorage.setItem('theme', 'light')
-              }}
+              onClick={() => setDarkMode(!darkMode)}
               className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm"
               title={darkMode ? "Switch to Pure White Theme" : "Switch to Dark Mode"}
             >
