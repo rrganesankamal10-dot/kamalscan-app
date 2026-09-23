@@ -5,7 +5,7 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import Tesseract from 'tesseract.js'
 import { Document, Packer, Paragraph, ImageRun } from 'docx'
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
-import { FileText, UploadCloud, Camera, X, ScanText, Copy, Loader2, RotateCw, ArrowUp, ArrowDown, Download, Crop, Eye, FileSearch, LayoutGrid, Check, Info, Lock, Zap, Cpu } from 'lucide-react'
+import { FileText, UploadCloud, Camera, X, ScanText, Copy, Loader2, RotateCw, ArrowUp, ArrowDown, Download, Crop, Eye, FileSearch, LayoutGrid, Check, Info, Lock, Zap, Cpu, Wand2, Stamp, Eraser, Target } from 'lucide-react'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -13,8 +13,16 @@ const TIER_CONFIG = {
   lossless: { label: 'Lossless / High Quality', quality: 0.95, scale: 1 },
   balanced: { label: 'Balanced / Recommended', quality: 0.75, scale: 0.85 },
   max: { label: 'Max Compression', quality: 0.5, scale: 0.6 },
-  custom: { label: 'Custom (manual)', quality: null, scale: 1 },
+  custom: { label: 'Custom (target size)', quality: null, scale: 1 },
 }
+
+const ENHANCE_MODES = {
+  none: { label: 'Original', filter: 'none' },
+  enhance: { label: 'Enhance', filter: 'contrast(1.2) brightness(1.06) saturate(1.1)' },
+  super: { label: 'Super (HD-style)', filter: 'contrast(1.4) brightness(1.1) saturate(1.2)' },
+  bw: { label: 'Black & White', filter: 'grayscale(1) contrast(1.35) brightness(1.05)' },
+}
+
 const MAX_TOTAL_MB = 50
 const FORMATS = ['pdf', 'jpeg', 'png', 'gif', 'docx']
 
@@ -74,7 +82,7 @@ async function rotateDataUrl(dataUrl, degrees) {
   return canvas.toDataURL('image/png')
 }
 
-async function compressFromSrc(src, tier, customQuality) {
+async function compressFromSrc(src, tier, customQuality, enhanceMode = 'none') {
   const config = TIER_CONFIG[tier]
   const quality = tier === 'custom' ? customQuality : config.quality
   const img = await loadImage(src)
@@ -84,16 +92,35 @@ async function compressFromSrc(src, tier, customQuality) {
   const ctx = canvas.getContext('2d')
   ctx.fillStyle = '#fff'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.filter = ENHANCE_MODES[enhanceMode]?.filter || 'none'
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
 }
 
-async function convertToGifBlob(dataUrl) {
+// Binary-search the JPEG quality value that gets closest to (without exceeding)
+// a target byte size — this is what powers "type 500 KB" instead of guessing a %.
+async function findQualityForTargetSize(src, targetBytes, enhanceMode = 'none') {
+  let lo = 0.05, hi = 1, best = 0.5
+  for (let i = 0; i < 7; i++) {
+    const mid = (lo + hi) / 2
+    const blob = await compressFromSrc(src, 'custom', mid, enhanceMode)
+    if (blob.size > targetBytes) {
+      hi = mid
+    } else {
+      best = mid
+      lo = mid
+    }
+  }
+  return best
+}
+
+async function convertToGifBlob(dataUrl, enhanceMode = 'none') {
   const img = await loadImage(dataUrl)
   const canvas = document.createElement('canvas')
   canvas.width = img.width
   canvas.height = img.height
   const ctx = canvas.getContext('2d')
+  ctx.filter = ENHANCE_MODES[enhanceMode]?.filter || 'none'
   ctx.drawImage(img, 0, 0)
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const palette = quantize(imageData.data, 256)
@@ -104,10 +131,23 @@ async function convertToGifBlob(dataUrl) {
   return new Blob([gif.bytes()], { type: 'image/gif' })
 }
 
-async function convertToDocxBlob(dataUrl) {
-  const res = await fetch(dataUrl)
+async function enhancedDataUrl(src, enhanceMode) {
+  if (enhanceMode === 'none') return src
+  const img = await loadImage(src)
+  const canvas = document.createElement('canvas')
+  canvas.width = img.width
+  canvas.height = img.height
+  const ctx = canvas.getContext('2d')
+  ctx.filter = ENHANCE_MODES[enhanceMode]?.filter || 'none'
+  ctx.drawImage(img, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
+async function convertToDocxBlob(dataUrl, enhanceMode = 'none') {
+  const src = await enhancedDataUrl(dataUrl, enhanceMode)
+  const res = await fetch(src)
   const arrayBuffer = await res.arrayBuffer()
-  const img = await loadImage(dataUrl)
+  const img = await loadImage(src)
   const maxWidth = 500
   const scale = Math.min(1, maxWidth / img.width)
   const doc = new Document({
@@ -144,6 +184,48 @@ const renderPdfPagesToImages = async (file) => {
     images.push(canvas.toDataURL('image/png'))
   }
   return images
+}
+
+async function applyWatermarkToDataUrl(src, settings) {
+  const img = await loadImage(src)
+  const canvas = document.createElement('canvas')
+  canvas.width = img.width
+  canvas.height = img.height
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, 0, 0)
+  ctx.save()
+  ctx.globalAlpha = settings.opacity
+  ctx.fillStyle = settings.color
+  ctx.font = `bold ${settings.fontSize}px sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  if (settings.style === 'diagonal') {
+    ctx.translate(canvas.width / 2, canvas.height / 2)
+    ctx.rotate((-30 * Math.PI) / 180)
+    const stepX = settings.fontSize * (settings.text.length * 0.55 + 5)
+    const stepY = settings.fontSize * 3.2
+    const diag = Math.sqrt(canvas.width ** 2 + canvas.height ** 2)
+    for (let y = -diag; y < diag; y += stepY) {
+      for (let x = -diag; x < diag; x += stepX) {
+        ctx.fillText(settings.text, x, y)
+      }
+    }
+  } else {
+    const positions = {
+      center: [canvas.width / 2, canvas.height / 2],
+      'top-left': [canvas.width * 0.18, canvas.height * 0.08],
+      'top-right': [canvas.width * 0.82, canvas.height * 0.08],
+      'bottom-left': [canvas.width * 0.18, canvas.height * 0.92],
+      'bottom-right': [canvas.width * 0.82, canvas.height * 0.92],
+    }
+    const [x, y] = positions[settings.position] || positions.center
+    ctx.translate(x, y)
+    ctx.rotate(((settings.angle || 0) * Math.PI) / 180)
+    ctx.fillText(settings.text, 0, 0)
+  }
+  ctx.restore()
+  return canvas.toDataURL('image/png')
 }
 
 function solveLinearSystem(A, b) {
@@ -309,29 +391,47 @@ function CropModal({ item, onCancel, onApply }) {
   )
 }
 
+// Quick single-page preview — opens instantly when you tap any thumbnail in the grid.
+// Sized generously (large on both mobile and desktop) since its whole purpose is readability.
+function QuickViewModal({ item, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 flex items-center justify-between flex-shrink-0 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-800 truncate pr-2">{item.name}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-red-500 flex-shrink-0"><X size={22} /></button>
+        </div>
+        <div className="p-3 sm:p-6 overflow-auto flex-1 flex items-center justify-center bg-slate-50">
+          <img
+            src={item.previewUrl}
+            alt={item.name}
+            className="max-w-full max-h-[78vh] rounded-lg shadow-lg"
+            style={{ filter: ENHANCE_MODES[item.enhanceMode || 'none'].filter }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PreviewModal({ pages, onClose }) {
   const [index, setIndex] = useState(0)
   const page = pages[Math.min(index, pages.length - 1)]
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
         <div className="p-4 flex items-center justify-between flex-shrink-0 border-b border-slate-100">
           <h3 className="font-semibold text-slate-800">Preview — Page {index + 1} of {pages.length}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-red-500"><X size={18} /></button>
+          <button onClick={onClose} className="text-slate-400 hover:text-red-500"><X size={20} /></button>
         </div>
         <div className="p-4 overflow-y-auto flex-1 flex items-center justify-center bg-slate-50">
-          <img key={page.id} src={page.previewUrl} alt={page.name} className="max-w-full max-h-[55vh] rounded-lg shadow" />
+          <img key={page.id} src={page.previewUrl} alt={page.name} className="max-w-full max-h-[65vh] rounded-lg shadow" style={{ filter: ENHANCE_MODES[page.enhanceMode || 'none'].filter }} />
         </div>
         <div className="flex gap-2 px-4 overflow-x-auto flex-shrink-0 pb-2">
           {pages.map((p, i) => (
-            <button
-              key={p.id}
-              onClick={() => setIndex(i)}
-              className="flex-shrink-0 rounded-md overflow-hidden border-2"
-              style={{ borderColor: i === index ? '#0284c7' : 'transparent' }}
-            >
-              <img src={p.previewUrl} alt={p.name} className="w-12 h-12 object-cover" />
+            <button key={p.id} onClick={() => setIndex(i)} className="flex-shrink-0 rounded-md overflow-hidden border-2" style={{ borderColor: i === index ? '#0284c7' : 'transparent' }}>
+              <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover" style={{ filter: ENHANCE_MODES[p.enhanceMode || 'none'].filter }} />
             </button>
           ))}
         </div>
@@ -421,25 +521,14 @@ function CollageModal({ queue, onCancel, onGenerate }) {
         <div className="px-5 flex-shrink-0">
           <div className="flex gap-2 mb-3">
             {layouts.map((l) => (
-              <button
-                key={l}
-                onClick={() => setLayout(l)}
-                className={`flex-1 text-xs py-2 rounded-md font-medium ${layout === l ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                {l}
-              </button>
+              <button key={l} onClick={() => setLayout(l)} className={`flex-1 text-xs py-2 rounded-md font-medium ${layout === l ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{l}</button>
             ))}
           </div>
         </div>
         <div className="px-5 overflow-y-auto flex-1">
           <div className="grid grid-cols-3 gap-2">
             {queue.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => toggle(item.id)}
-                className="relative rounded-lg overflow-hidden border-2"
-                style={{ borderColor: selectedIds.includes(item.id) ? '#0284c7' : 'transparent' }}
-              >
+              <button key={item.id} onClick={() => toggle(item.id)} className="relative rounded-lg overflow-hidden border-2" style={{ borderColor: selectedIds.includes(item.id) ? '#0284c7' : 'transparent' }}>
                 <img src={item.previewUrl} alt={item.name} className="w-full h-20 object-cover" />
                 {selectedIds.includes(item.id) && (
                   <div className="absolute inset-0 bg-sky-600/30 flex items-center justify-center">
@@ -462,6 +551,76 @@ function CollageModal({ queue, onCancel, onGenerate }) {
   )
 }
 
+function WatermarkModal({ scopeLabel, onCancel, onApply }) {
+  const [text, setText] = useState('CONFIDENTIAL')
+  const [style, setStyle] = useState('diagonal')
+  const [position, setPosition] = useState('center')
+  const [fontSize, setFontSize] = useState(36)
+  const [color, setColor] = useState('#ff0000')
+  const [opacity, setOpacity] = useState(0.3)
+  const [angle, setAngle] = useState(0)
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="p-5 pb-2 flex-shrink-0">
+          <h3 className="font-semibold text-slate-800 mb-1 flex items-center gap-2"><Stamp size={18} className="text-sky-600" /> Add Watermark</h3>
+          <p className="text-xs text-slate-500">Applying to: <b>{scopeLabel}</b></p>
+        </div>
+        <div className="px-5 overflow-y-auto flex-1 space-y-3">
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">Watermark text</label>
+            <input type="text" value={text} onChange={(e) => setText(e.target.value)} className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-300" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">Style</label>
+            <div className="flex gap-2">
+              <button onClick={() => setStyle('diagonal')} className={`flex-1 text-xs py-2 rounded-md font-medium ${style === 'diagonal' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Tiled Diagonal</button>
+              <button onClick={() => setStyle('single')} className={`flex-1 text-xs py-2 rounded-md font-medium ${style === 'single' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Single Placement</button>
+            </div>
+          </div>
+          {style === 'single' && (
+            <>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Position</label>
+                <select value={position} onChange={(e) => setPosition(e.target.value)} className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-300">
+                  <option value="center">Center</option>
+                  <option value="top-left">Top Left</option>
+                  <option value="top-right">Top Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                  <option value="bottom-right">Bottom Right</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Rotation angle: {angle}°</label>
+                <input type="range" min="-90" max="90" value={angle} onChange={(e) => setAngle(parseInt(e.target.value))} className="w-full" />
+              </div>
+            </>
+          )}
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">Font size: {fontSize}px</label>
+            <input type="range" min="16" max="80" value={fontSize} onChange={(e) => setFontSize(parseInt(e.target.value))} className="w-full" />
+          </div>
+          <div className="flex gap-3 items-center">
+            <div className="flex-1">
+              <label className="text-xs text-slate-500 block mb-1">Color</label>
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-full h-9 rounded-md border border-slate-200" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-slate-500 block mb-1">Opacity: {Math.round(opacity * 100)}%</label>
+              <input type="range" min="0.05" max="1" step="0.05" value={opacity} onChange={(e) => setOpacity(parseFloat(e.target.value))} className="w-full" />
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2 p-5 pt-3 flex-shrink-0 border-t border-slate-100">
+          <button onClick={onCancel} className="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Cancel</button>
+          <button onClick={() => onApply({ text: text || 'WATERMARK', style, position, fontSize, color, opacity, angle })} className="flex-1 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-medium">Apply</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [queue, setQueue] = useState([])
   const [toasts, setToasts] = useState([])
@@ -478,6 +637,8 @@ function App() {
   const [batchOcrRunning, setBatchOcrRunning] = useState(false)
   const [ocrEverUsed, setOcrEverUsed] = useState(false)
   const [videoAspect, setVideoAspect] = useState(null)
+  const [watermarkTarget, setWatermarkTarget] = useState(null)
+  const [quickViewId, setQuickViewId] = useState(null)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -509,7 +670,9 @@ function App() {
 
   const makeItem = (previewUrl, name, kind, originalSize) => ({
     id: crypto.randomUUID(), name, kind, previewUrl, originalSize,
-    tier: 'balanced', customQuality: 0.8, downloadFormat: 'pdf',
+    tier: 'balanced', customQuality: 0.8, downloadFormat: 'pdf', enhanceMode: 'none',
+    watermarkBackup: null,
+    targetSize: 200, targetUnit: 'KB', fittingSize: false,
     status: 'ready', savedPercent: null, ocrText: '', ocrLoading: false,
   })
 
@@ -592,6 +755,27 @@ function App() {
     addToast('Crop applied — document straightened')
   }
 
+  const applyWatermark = async (settings) => {
+    const targets = watermarkTarget.mode === 'all' ? queue.map((q) => q.id) : [watermarkTarget.itemId]
+    for (const id of targets) {
+      const item = queue.find((f) => f.id === id)
+      if (!item) continue
+      const backup = item.watermarkBackup || item.previewUrl
+      const watermarked = await applyWatermarkToDataUrl(backup, settings)
+      if (item.kind === 'image' && !item.watermarkBackup) URL.revokeObjectURL(item.previewUrl)
+      updateItem(id, { previewUrl: watermarked, kind: 'pdf-page', watermarkBackup: backup })
+    }
+    setWatermarkTarget(null)
+    addToast(targets.length > 1 ? `Watermark applied to ${targets.length} pages` : 'Watermark applied')
+  }
+
+  const removeWatermark = (id) => {
+    const item = queue.find((f) => f.id === id)
+    if (!item || !item.watermarkBackup) return
+    updateItem(id, { previewUrl: item.watermarkBackup, watermarkBackup: null })
+    addToast('Watermark removed')
+  }
+
   const handleDrop = (e) => { e.preventDefault(); setDragOver(false); addFilesToQueue(e.dataTransfer.files) }
 
   const startCamera = async () => {
@@ -656,10 +840,20 @@ function App() {
 
   const copyToClipboard = (text) => { navigator.clipboard.writeText(text); addToast('Text copied to clipboard') }
 
+  // Runs the binary-search quality fit for a target size, stores the resulting quality,
+  // and switches the item into "custom" tier so that quality is what actually gets used.
+  const fitToTargetSize = async (item) => {
+    updateItem(item.id, { fittingSize: true })
+    const targetBytes = item.targetUnit === 'MB' ? item.targetSize * 1024 * 1024 : item.targetSize * 1024
+    const quality = await findQualityForTargetSize(item.previewUrl, targetBytes, item.enhanceMode)
+    updateItem(item.id, { tier: 'custom', customQuality: quality, fittingSize: false })
+    addToast(`Fit to ~${item.targetSize}${item.targetUnit} — quality set to ${Math.round(quality * 100)}%`)
+  }
+
   const downloadSingle = async (item) => {
     const base = item.name.replace(/\.[^/.]+$/, '') || 'kamalscan-file'
     if (item.downloadFormat === 'pdf') {
-      const compressedBlob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality)
+      const compressedBlob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode)
       const dataUrl = await blobToDataUrl(compressedBlob)
       const pdf = new jsPDF()
       const imgProps = pdf.getImageProperties(dataUrl)
@@ -668,13 +862,14 @@ function App() {
       pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight)
       pdf.save(`${base}.pdf`)
     } else if (item.downloadFormat === 'png') {
-      triggerDownload(await (await fetch(item.previewUrl)).blob(), `${base}.png`)
+      const enhanced = await enhancedDataUrl(item.previewUrl, item.enhanceMode)
+      triggerDownload(await (await fetch(enhanced)).blob(), `${base}.png`)
     } else if (item.downloadFormat === 'jpeg') {
-      triggerDownload(await compressFromSrc(item.previewUrl, item.tier, item.customQuality), `${base}.jpeg`)
+      triggerDownload(await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode), `${base}.jpeg`)
     } else if (item.downloadFormat === 'gif') {
-      triggerDownload(await convertToGifBlob(item.previewUrl), `${base}.gif`)
+      triggerDownload(await convertToGifBlob(item.previewUrl, item.enhanceMode), `${base}.gif`)
     } else if (item.downloadFormat === 'docx') {
-      triggerDownload(await convertToDocxBlob(item.previewUrl), `${base}.docx`)
+      triggerDownload(await convertToDocxBlob(item.previewUrl, item.enhanceMode), `${base}.docx`)
     }
     addToast(`Thank you for downloading ${base}.${item.downloadFormat}!`)
   }
@@ -688,7 +883,7 @@ function App() {
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i]
       updateItem(item.id, { status: 'processing' })
-      const blob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality)
+      const blob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode)
       totalOriginal += item.originalSize
       totalCompressed += blob.size
       const savedPercent = Math.max(0, Math.round((1 - blob.size / item.originalSize) * 100))
@@ -708,11 +903,10 @@ function App() {
 
   const totalSize = queue.reduce((sum, f) => sum + f.originalSize, 0)
   const cropItem = queue.find((f) => f.id === cropItemId)
+  const quickViewItem = queue.find((f) => f.id === quickViewId)
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-sky-100 via-cyan-50 to-blue-100 text-slate-800 pb-28">
-      {/* Soft decorative blobs behind the header — the touch that separates a premium-feeling
-          landing page from a flat one, without adding any real visual noise */}
       <div className="absolute -top-20 -left-20 w-80 h-80 bg-sky-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 pointer-events-none"></div>
       <div className="absolute top-10 right-0 w-96 h-96 bg-cyan-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 pointer-events-none"></div>
 
@@ -743,36 +937,20 @@ function App() {
           <p className="text-xs text-slate-400 mt-1">Supports up to {MAX_TOTAL_MB}MB per batch.</p>
           <div className="mt-3 flex items-center justify-center gap-2">
             <label className="text-xs text-slate-500">Insert new pages at position:</label>
-            <input
-              type="number"
-              min="1"
-              value={insertAt}
-              onChange={(e) => setInsertAt(e.target.value)}
-              placeholder="end"
-              className="w-16 text-xs border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-300"
-            />
+            <input type="number" min="1" value={insertAt} onChange={(e) => setInsertAt(e.target.value)} placeholder="end" className="w-16 text-xs border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-300" />
           </div>
         </section>
 
         <section className="bg-white rounded-2xl shadow-md p-6">
           <h2 className="font-semibold text-lg mb-3 flex items-center gap-2 text-slate-800"><Camera size={20} className="text-sky-600" /> Scanner</h2>
-          <div
-            className="relative w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-slate-900 border border-slate-200 flex items-center justify-center"
-            style={{ aspectRatio: videoAspect || '3 / 4' }}
-          >
+          <div className="relative w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-slate-900 border border-slate-200 flex items-center justify-center" style={{ aspectRatio: videoAspect || '3 / 4' }}>
             {!cameraActive && (
               <div className="text-center text-slate-400 px-6">
                 <Camera size={56} className="mx-auto mb-2 opacity-60" />
                 <p className="text-sm">Camera preview inactive. Click "Initialize Scanner" to begin.</p>
               </div>
             )}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)}
-              className={`absolute inset-0 w-full h-full object-contain ${cameraActive ? 'block' : 'hidden'}`}
-            />
+            <video ref={videoRef} autoPlay playsInline onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)} className={`absolute inset-0 w-full h-full object-contain ${cameraActive ? 'block' : 'hidden'}`} />
             {cameraActive && (
               <>
                 <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
@@ -798,6 +976,7 @@ function App() {
             <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
               <h2 className="font-semibold text-lg text-slate-800">PDF Pages <span className="text-sky-600 text-sm font-normal">({queue.length})</span></h2>
               <div className="flex gap-2 flex-wrap">
+                <button onClick={() => setWatermarkTarget({ mode: 'all' })} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1.5"><Stamp size={13} /> Watermark All</button>
                 <button onClick={() => setShowCollage(true)} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1.5"><LayoutGrid size={13} /> Collage</button>
                 <button onClick={() => setShowPreview(true)} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1.5"><Eye size={13} /> Preview</button>
                 <button onClick={runBatchOcr} disabled={batchOcrRunning} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-md flex items-center gap-1.5 disabled:opacity-50">
@@ -806,6 +985,7 @@ function App() {
                 </button>
               </div>
             </div>
+            <p className="text-xs text-slate-400 mb-3">Tap any page thumbnail below to view it larger.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {queue.map((item, index) => (
                 <div key={item.id} className="border border-slate-200 rounded-xl p-4 hover:shadow-lg transition-shadow relative bg-slate-50/50">
@@ -813,7 +993,14 @@ function App() {
                   <button onClick={() => removeFile(item.id)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-50">
                     <X size={14} />
                   </button>
-                  <img src={item.previewUrl} alt={item.name} className="w-full h-32 object-cover rounded-lg mb-2 bg-slate-100 mt-2" />
+                  <button onClick={() => setQuickViewId(item.id)} className="w-full block">
+                    <img
+                      src={item.previewUrl}
+                      alt={item.name}
+                      className="w-full h-36 object-cover rounded-lg mb-2 bg-slate-100 mt-2 cursor-zoom-in hover:opacity-90 transition-opacity"
+                      style={{ filter: ENHANCE_MODES[item.enhanceMode].filter }}
+                    />
+                  </button>
                   <p className="text-sm font-medium truncate">{item.name}</p>
                   <p className="text-xs text-slate-400 mb-2">{formatBytes(item.originalSize)}</p>
 
@@ -828,16 +1015,52 @@ function App() {
                     <button onClick={() => setCropItemId(item.id)} className="flex-1 text-xs bg-sky-100 hover:bg-sky-200 text-sky-700 rounded-md py-1.5 flex items-center justify-center"><Crop size={13} /></button>
                   </div>
 
+                  <div className="flex gap-1.5 mb-2">
+                    <button onClick={() => setWatermarkTarget({ mode: 'single', itemId: item.id })} className="flex-1 text-xs bg-sky-100 hover:bg-sky-200 text-sky-700 rounded-md py-1.5 flex items-center justify-center gap-1"><Stamp size={12} /> Watermark</button>
+                    {item.watermarkBackup && (
+                      <button onClick={() => removeWatermark(item.id)} className="flex-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-md py-1.5 flex items-center justify-center gap-1"><Eraser size={12} /> Remove</button>
+                    )}
+                  </div>
+
+                  <div className="mb-2">
+                    <label className="text-xs text-slate-500 flex items-center gap-1 mb-1"><Wand2 size={12} /> Enhancement</label>
+                    <select value={item.enhanceMode} onChange={(e) => updateItem(item.id, { enhanceMode: e.target.value })} className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300">
+                      {Object.entries(ENHANCE_MODES).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+                    </select>
+                  </div>
+
                   <select value={item.tier} onChange={(e) => updateItem(item.id, { tier: e.target.value })} className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-sky-300">
                     {Object.entries(TIER_CONFIG).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
                   </select>
 
                   {item.tier === 'custom' && (
-                    <div className="mb-2">
-                      <label className="text-xs text-slate-500">
-                        Quality: <b>{Math.round(item.customQuality * 100)}%</b>
-                        <input type="range" min="0.1" max="1" step="0.05" value={item.customQuality} onChange={(e) => updateItem(item.id, { customQuality: parseFloat(e.target.value) })} className="w-full" />
-                      </label>
+                    <div className="mb-2 bg-sky-50 rounded-md p-2">
+                      <label className="text-xs text-slate-500 flex items-center gap-1 mb-1"><Target size={12} /> Target size</label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="number"
+                          min="10"
+                          value={item.targetSize}
+                          onChange={(e) => updateItem(item.id, { targetSize: parseFloat(e.target.value) || 0 })}
+                          className="flex-1 min-w-0 text-xs border border-slate-200 rounded-md px-2 py-1.5"
+                        />
+                        <select
+                          value={item.targetUnit}
+                          onChange={(e) => updateItem(item.id, { targetUnit: e.target.value })}
+                          className="text-xs border border-slate-200 rounded-md px-1.5 py-1.5"
+                        >
+                          <option value="KB">KB</option>
+                          <option value="MB">MB</option>
+                        </select>
+                        <button
+                          onClick={() => fitToTargetSize(item)}
+                          disabled={item.fittingSize}
+                          className="text-xs bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-2.5 rounded-md flex items-center justify-center"
+                        >
+                          {item.fittingSize ? <Loader2 size={13} className="animate-spin" /> : 'Fit'}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Currently set to ~{Math.round(item.customQuality * 100)}% quality</p>
                     </div>
                   )}
 
@@ -888,7 +1111,7 @@ function App() {
             </div>
             <div className="flex gap-3">
               <Zap size={20} className="text-sky-600 flex-shrink-0 mt-0.5" />
-              <p><b className="text-slate-800">On-device OCR &amp; compression.</b> Text extraction and image compression both run locally using WebAssembly and the Canvas API — no round trip to any backend.</p>
+              <p><b className="text-slate-800">On-device processing.</b> OCR, compression, enhancement, watermarking, and target-size fitting all run locally using WebAssembly and the Canvas API.</p>
             </div>
           </div>
         </section>
@@ -912,6 +1135,7 @@ function App() {
       )}
 
       {cropItem && <CropModal item={cropItem} onCancel={() => setCropItemId(null)} onApply={applyCrop} />}
+      {quickViewItem && <QuickViewModal item={quickViewItem} onClose={() => setQuickViewId(null)} />}
       {showPreview && queue.length > 0 && <PreviewModal pages={queue} onClose={() => setShowPreview(false)} />}
       {showCollage && (
         <CollageModal
@@ -926,6 +1150,13 @@ function App() {
       )}
       {batchOcrText !== null && (
         <BatchOcrModal text={batchOcrText} onClose={() => setBatchOcrText(null)} onCopy={() => copyToClipboard(batchOcrText)} />
+      )}
+      {watermarkTarget && (
+        <WatermarkModal
+          scopeLabel={watermarkTarget.mode === 'all' ? `all ${queue.length} pages` : 'this page only'}
+          onCancel={() => setWatermarkTarget(null)}
+          onApply={applyWatermark}
+        />
       )}
 
       <div className="fixed top-4 right-4 space-y-2 z-50">
