@@ -901,30 +901,53 @@ function App() {
     addToast('Watermark removed')
   }
 
-  // ── Drag-to-reorder ────────────────────────────────────────────────────────
+  // ── Move item up / down ────────────────────────────────────────────────────
+  const moveItem = (id, direction) => {
+    setQueue((prev) => {
+      const index = prev.findIndex((f) => f.id === id)
+      const targetIndex = index + direction
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+      const copy = [...prev]
+      ;[copy[index], copy[targetIndex]] = [copy[targetIndex], copy[index]]
+      return copy
+    })
+  }
+
+  // ── Drag-to-reorder (fixed: only trigger from grip handle) ─────────────────
   const handleDragStart = (e, id) => {
-    dragSrcId.current = id
+    // Only allow drag when initiated from the grip handle
+    if (!dragSrcId.current) {
+      e.preventDefault()
+      return
+    }
     e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+  }
+  const handleGripMouseDown = (id) => {
+    // Mark which card is being dragged before the dragstart fires
+    dragSrcId.current = id
   }
   const handleDragEnterCard = (e, id) => {
     e.preventDefault()
-    setDragOverId(id)
+    if (dragSrcId.current && dragSrcId.current !== id) setDragOverId(id)
   }
-  const handleDragOverCard = (e) => { e.preventDefault() }
+  const handleDragOverCard = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }
   const handleDropCard = (e, targetId) => {
     e.preventDefault()
+    e.stopPropagation()
+    const srcId = dragSrcId.current
     setDragOverId(null)
-    if (!dragSrcId.current || dragSrcId.current === targetId) return
+    dragSrcId.current = null
+    if (!srcId || srcId === targetId) return
     setQueue((prev) => {
       const copy = [...prev]
-      const srcIdx = copy.findIndex((f) => f.id === dragSrcId.current)
+      const srcIdx = copy.findIndex((f) => f.id === srcId)
       const tgtIdx = copy.findIndex((f) => f.id === targetId)
       if (srcIdx < 0 || tgtIdx < 0) return prev
       const [item] = copy.splice(srcIdx, 1)
       copy.splice(tgtIdx, 0, item)
       return copy
     })
-    dragSrcId.current = null
   }
   const handleDragEnd = () => { setDragOverId(null); dragSrcId.current = null }
 
@@ -944,7 +967,14 @@ function App() {
   }
 
   // ── Camera ─────────────────────────────────────────────────────────────────
-  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); addFilesToQueue(e.dataTransfer.files) }
+  const handleFileDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    // Only process if it's real files (not a card drag)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFilesToQueue(e.dataTransfer.files)
+    }
+  }
 
   const startCamera = async () => {
     try {
@@ -1203,9 +1233,9 @@ function App() {
 
         {/* ─── Upload Zone ─────────────────────────────────────────────── */}
         <section
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
+          onDrop={handleFileDrop}
           className={`rounded-2xl border-2 border-dashed p-10 text-center transition-all shadow-sm ${
             dragOver
               ? 'border-sky-500 bg-sky-50/80 dark:bg-sky-950/40 scale-[1.01]'
@@ -1309,7 +1339,7 @@ function App() {
             </div>
 
             {/* Cards grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {queue.map((item, index) => (
                 <div
                   key={item.id}
@@ -1319,154 +1349,280 @@ function App() {
                   onDragOver={handleDragOverCard}
                   onDrop={(e) => handleDropCard(e, item.id)}
                   onDragEnd={handleDragEnd}
-                  className={`border rounded-2xl p-4 transition-all relative bg-white dark:bg-slate-800/50 ${
+                  className={`relative rounded-2xl transition-all duration-200 bg-white dark:bg-slate-800/60 overflow-hidden ${
                     dragOverId === item.id
-                      ? 'border-sky-400 dark:border-sky-600 shadow-lg shadow-sky-100 dark:shadow-sky-900/30 scale-[1.02]'
-                      : 'border-slate-200/90 dark:border-slate-800 hover:shadow-md'
+                      ? 'ring-2 ring-sky-400 shadow-xl shadow-sky-100/60 dark:shadow-sky-900/30 scale-[1.02]'
+                      : 'border border-slate-200 dark:border-slate-700/80 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
-                  {/* Drag handle + page number */}
-                  <div className="absolute top-2 left-2 flex items-center gap-1 z-10">
-                    <span className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-                      <GripVertical size={14} />
-                    </span>
-                    <span className="bg-slate-800/80 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-xs">{index + 1}</span>
+                  {/* ── Card Top Bar ────────────────────────────────────── */}
+                  <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b border-slate-100 dark:border-slate-700/60">
+                    {/* Left: grip + badge */}
+                    <div className="flex items-center gap-2">
+                      {/* Grip handle — ONLY this triggers drag */}
+                      <span
+                        onMouseDown={() => handleGripMouseDown(item.id)}
+                        onMouseUp={() => { if (!dragOverId) dragSrcId.current = null }}
+                        className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-sky-500 dark:hover:text-sky-400 transition-colors select-none"
+                        title="Drag to reorder"
+                        draggable={false}
+                      >
+                        <GripVertical size={16} />
+                      </span>
+                      {/* Page badge */}
+                      <span className="text-[10px] font-bold text-white bg-gradient-to-r from-sky-600 to-cyan-500 px-2 py-0.5 rounded-full shadow-sm">
+                        PAGE {index + 1}
+                      </span>
+                      {item.watermarkBackup && (
+                        <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                          WATERMARKED
+                        </span>
+                      )}
+                    </div>
+                    {/* Right: up/down/remove controls */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => moveItem(item.id, -1)}
+                        disabled={index === 0}
+                        draggable={false}
+                        className="w-6 h-6 flex items-center justify-center rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30 disabled:cursor-not-allowed text-slate-500 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                        title="Move up"
+                      >
+                        <ArrowUp size={11} />
+                      </button>
+                      <button
+                        onClick={() => moveItem(item.id, 1)}
+                        disabled={index === queue.length - 1}
+                        draggable={false}
+                        className="w-6 h-6 flex items-center justify-center rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30 disabled:cursor-not-allowed text-slate-500 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                        title="Move down"
+                      >
+                        <ArrowDown size={11} />
+                      </button>
+                      <button
+                        onClick={() => removeFile(item.id)}
+                        draggable={false}
+                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-50 dark:hover:bg-red-950/40 text-slate-400 hover:text-red-500 transition-colors"
+                        title="Remove page"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Remove button */}
-                  <button onClick={() => removeFile(item.id)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors z-10">
-                    <X size={14} />
-                  </button>
-
-                  {/* Thumbnail */}
-                  <button onClick={() => setQuickViewId(item.id)} className="w-full block group mt-2">
+                  {/* ── Thumbnail ────────────────────────────────────────── */}
+                  <div className="relative group cursor-zoom-in" onClick={() => setQuickViewId(item.id)}>
                     <img
                       src={item.previewUrl}
                       alt={item.name}
-                      className="w-full h-36 object-cover rounded-xl mb-2 bg-slate-50 dark:bg-slate-900 cursor-zoom-in group-hover:opacity-90 transition-opacity border border-slate-100 dark:border-slate-800"
+                      draggable={false}
+                      className="w-full h-40 object-cover bg-slate-50 dark:bg-slate-900 transition-opacity group-hover:opacity-90"
                       style={{ filter: ENHANCE_MODES[item.enhanceMode].filter }}
                     />
-                  </button>
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/20 transition-all flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-lg shadow-md flex items-center gap-1">
+                        <Eye size={11} /> Quick View
+                      </span>
+                    </div>
+                    {/* Saved badge overlay */}
+                    {item.savedPercent !== null && (
+                      <span className="absolute bottom-2 left-2 text-[10px] font-bold bg-emerald-500 text-white px-2 py-0.5 rounded-full shadow">
+                        −{item.savedPercent}%
+                      </span>
+                    )}
+                  </div>
 
-                  {/* Inline name edit */}
-                  <div className="mb-1 flex items-center gap-1">
-                    {editingNameId === item.id ? (
-                      <input
-                        ref={editInputRef}
-                        value={editingNameValue}
-                        onChange={(e) => setEditingNameValue(e.target.value)}
-                        onBlur={commitRename}
-                        onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingNameId(null) }}
-                        className="flex-1 text-xs font-semibold text-slate-800 dark:text-slate-100 border border-sky-400 rounded-md px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-sky-400 bg-white dark:bg-slate-900"
-                        autoFocus
-                      />
-                    ) : (
+                  {/* ── Card Body ────────────────────────────────────────── */}
+                  <div className="p-3 space-y-2.5">
+
+                    {/* Inline name edit */}
+                    <div className="flex items-center gap-1">
+                      {editingNameId === item.id ? (
+                        <input
+                          ref={editInputRef}
+                          value={editingNameValue}
+                          onChange={(e) => setEditingNameValue(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingNameId(null) }}
+                          className="flex-1 text-xs font-semibold text-slate-800 dark:text-slate-100 border border-sky-400 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-300 bg-white dark:bg-slate-900"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => startRename(item)}
+                          draggable={false}
+                          title="Click to rename"
+                          className="flex-1 text-left text-xs font-semibold truncate text-slate-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 group flex items-center gap-1 transition-colors"
+                        >
+                          <span className="truncate">{item.name}</span>
+                          <Pencil size={10} className="flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
+                        </button>
+                      )}
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 flex-shrink-0">{formatBytes(item.originalSize)}</span>
+                    </div>
+
+                    {/* ── Action buttons row 1: Rotate · Straighten · Watermark ── */}
+                    <div className="grid grid-cols-3 gap-1.5">
                       <button
-                        onClick={() => startRename(item)}
-                        title="Click to rename"
-                        className="flex-1 text-left text-xs font-semibold truncate text-slate-800 dark:text-slate-100 hover:text-sky-600 dark:hover:text-sky-400 transition-colors group flex items-center gap-1"
+                        onClick={() => rotateItem(item.id)}
+                        draggable={false}
+                        className="flex flex-col items-center gap-0.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[10px] font-medium border border-slate-100 dark:border-slate-600/50"
                       >
-                        <span className="truncate">{item.name}</span>
-                        <Pencil size={10} className="flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
+                        <RotateCw size={13} />
+                        Rotate
+                      </button>
+                      <button
+                        onClick={() => setCropItemId(item.id)}
+                        draggable={false}
+                        className="flex flex-col items-center gap-0.5 py-2 rounded-xl bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-600 dark:text-sky-400 transition-colors text-[10px] font-medium border border-sky-100 dark:border-sky-900/60"
+                      >
+                        <Crop size={13} />
+                        Straighten
+                      </button>
+                      <button
+                        onClick={() => setWatermarkTarget({ mode: 'single', itemId: item.id })}
+                        draggable={false}
+                        className="flex flex-col items-center gap-0.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-400 transition-colors text-[10px] font-medium border border-indigo-100 dark:border-indigo-900/60"
+                      >
+                        <Stamp size={13} />
+                        Watermark
+                      </button>
+                    </div>
+
+                    {/* Remove watermark */}
+                    {item.watermarkBackup && (
+                      <button
+                        onClick={() => removeWatermark(item.id)}
+                        draggable={false}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium border border-red-100 dark:border-red-900/50 transition-colors"
+                      >
+                        <Eraser size={12} /> Remove Watermark
                       </button>
                     )}
-                  </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">{formatBytes(item.originalSize)}</p>
 
-                  {/* Saved badge */}
-                  {item.savedPercent !== null && (
-                    <span className="inline-block text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-md mb-2">
-                      Saved {item.savedPercent}%
-                    </span>
-                  )}
+                    {/* ── Enhancement filter ─────────────────────────────── */}
+                    <div>
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-1">
+                        <Wand2 size={10} /> Enhancement
+                      </label>
+                      <select
+                        value={item.enhanceMode}
+                        onChange={(e) => updateItem(item.id, { enhanceMode: e.target.value })}
+                        className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                      >
+                        {Object.entries(ENHANCE_MODES).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+                      </select>
+                    </div>
 
-                  {/* Rotate + Crop row */}
-                  <div className="flex gap-1.5 mb-2">
-                    <button onClick={() => rotateItem(item.id)} className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg py-1.5 flex items-center justify-center gap-1" title="Rotate 90°"><RotateCw size={12} /> Rotate</button>
-                    <button onClick={() => setCropItemId(item.id)} className="flex-1 text-xs bg-sky-50 dark:bg-sky-950/80 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 rounded-lg py-1.5 flex items-center justify-center gap-1 font-medium" title="Straighten / Crop"><Crop size={12} /> Straighten</button>
-                  </div>
+                    {/* ── White padding ──────────────────────────────────── */}
+                    <div>
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center justify-between mb-1">
+                        <span className="flex items-center gap-1"><Maximize2 size={10} /> White Padding</span>
+                        <span className="font-bold text-slate-600 dark:text-slate-300">{item.paddingPx}px</span>
+                      </label>
+                      <input
+                        type="range" min="0" max="80" step="4" value={item.paddingPx}
+                        onChange={(e) => updateItem(item.id, { paddingPx: parseInt(e.target.value) })}
+                        className="w-full accent-sky-600"
+                      />
+                    </div>
 
-                  {/* Watermark row */}
-                  <div className="flex gap-1.5 mb-2">
-                    <button onClick={() => setWatermarkTarget({ mode: 'single', itemId: item.id })} className="flex-1 text-xs bg-sky-50 dark:bg-sky-950/80 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 rounded-lg py-1.5 flex items-center justify-center gap-1 font-medium"><Stamp size={12} /> Watermark</button>
-                    {item.watermarkBackup && (
-                      <button onClick={() => removeWatermark(item.id)} className="flex-1 text-xs bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 rounded-lg py-1.5 flex items-center justify-center gap-1 font-medium"><Eraser size={12} /> Remove</button>
+                    {/* ── Compression tier ───────────────────────────────── */}
+                    <div>
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-1">
+                        <Sliders size={10} /> Compression
+                      </label>
+                      <select
+                        value={item.tier}
+                        onChange={(e) => updateItem(item.id, { tier: e.target.value })}
+                        className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                      >
+                        {Object.entries(TIER_CONFIG).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Custom target size */}
+                    {item.tier === 'custom' && (
+                      <div className="bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-950/50 dark:to-cyan-950/50 rounded-xl p-3 border border-sky-100 dark:border-sky-900/60 space-y-1.5">
+                        <label className="text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                          <Target size={10} /> Target File Size
+                        </label>
+                        <div className="flex gap-1.5">
+                          <input
+                            type="number" min="10" value={item.targetSize}
+                            onChange={(e) => updateItem(item.id, { targetSize: parseFloat(e.target.value) || 0 })}
+                            className="flex-1 min-w-0 text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                          />
+                          <select
+                            value={item.targetUnit}
+                            onChange={(e) => updateItem(item.id, { targetUnit: e.target.value })}
+                            className="text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-1.5 py-1.5 focus:outline-none"
+                          >
+                            <option value="KB">KB</option>
+                            <option value="MB">MB</option>
+                          </select>
+                          <button
+                            onClick={() => fitToTargetSize(item)}
+                            disabled={item.fittingSize}
+                            draggable={false}
+                            className="text-xs bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-3 rounded-lg flex items-center justify-center font-semibold transition-colors"
+                          >
+                            {item.fittingSize ? <Loader2 size={12} className="animate-spin" /> : 'Fit'}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-sky-600/70 dark:text-sky-400/70">
+                          Quality: ~{Math.round(item.customQuality * 100)}%
+                        </p>
+                      </div>
                     )}
-                  </div>
 
-                  {/* Enhancement filter */}
-                  <div className="mb-2">
-                    <label className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mb-1"><Wand2 size={11} /> Enhancement filter</label>
-                    <select value={item.enhanceMode} onChange={(e) => updateItem(item.id, { enhanceMode: e.target.value })} className="w-full text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300">
-                      {Object.entries(ENHANCE_MODES).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                    </select>
-                  </div>
+                    {/* ── Download row ───────────────────────────────────── */}
+                    <div className="flex gap-1.5 pt-0.5">
+                      <select
+                        value={item.downloadFormat}
+                        onChange={(e) => updateItem(item.id, { downloadFormat: e.target.value })}
+                        className="flex-1 text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                      >
+                        {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
+                      </select>
+                      <button
+                        onClick={() => downloadSingle(item)}
+                        draggable={false}
+                        className="bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white text-xs px-4 rounded-lg flex items-center gap-1.5 font-semibold shadow-sm transition-all hover:scale-[1.02]"
+                      >
+                        <Download size={13} /> Save
+                      </button>
+                    </div>
 
-                  {/* Padding control */}
-                  <div className="mb-2">
-                    <label className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mb-1">
-                      <Maximize2 size={11} /> White padding: {item.paddingPx}px
-                    </label>
-                    <input
-                      type="range" min="0" max="80" step="4" value={item.paddingPx}
-                      onChange={(e) => updateItem(item.id, { paddingPx: parseInt(e.target.value) })}
-                      className="w-full"
-                    />
-                  </div>
+                    {/* ── OCR ───────────────────────────────────────────── */}
+                    <button
+                      onClick={() => runOcr(item.id)}
+                      disabled={item.ocrLoading}
+                      draggable={false}
+                      className="w-full text-xs bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 disabled:opacity-50 rounded-xl py-2 font-semibold flex items-center justify-center gap-1.5 border border-emerald-100 dark:border-emerald-900/50 transition-colors"
+                    >
+                      {item.ocrLoading ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />}
+                      {item.ocrLoading ? 'Reading text...' : `Extract Text (${OCR_LANGS[ocrLang]})`}
+                    </button>
 
-                  {/* Compression tier */}
-                  <select value={item.tier} onChange={(e) => updateItem(item.id, { tier: e.target.value })} className="w-full text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 mb-2 focus:outline-none focus:ring-2 focus:ring-sky-300">
-                    {Object.entries(TIER_CONFIG).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                  </select>
-
-                  {/* Custom target size */}
-                  {item.tier === 'custom' && (
-                    <div className="mb-2 bg-sky-50/70 dark:bg-sky-950/40 rounded-xl p-2.5 border border-sky-100 dark:border-sky-900">
-                      <label className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mb-1 font-medium"><Target size={11} /> Custom Target Size</label>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="number" min="10" value={item.targetSize}
-                          onChange={(e) => updateItem(item.id, { targetSize: parseFloat(e.target.value) || 0 })}
-                          className="flex-1 min-w-0 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5"
+                    {item.ocrText && (
+                      <div className="space-y-1">
+                        <textarea
+                          readOnly
+                          value={item.ocrText}
+                          className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 rounded-lg p-2 h-20 font-mono resize-none focus:outline-none"
                         />
-                        <select value={item.targetUnit} onChange={(e) => updateItem(item.id, { targetUnit: e.target.value })} className="text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-1.5 py-1.5">
-                          <option value="KB">KB</option>
-                          <option value="MB">MB</option>
-                        </select>
                         <button
-                          onClick={() => fitToTargetSize(item)}
-                          disabled={item.fittingSize}
-                          className="text-xs bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-3 rounded-lg flex items-center justify-center font-medium"
+                          onClick={() => copyToClipboard(item.ocrText)}
+                          draggable={false}
+                          className="w-full text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg py-1.5 flex items-center justify-center gap-1.5 transition-colors font-medium"
                         >
-                          {item.fittingSize ? <Loader2 size={13} className="animate-spin" /> : 'Fit'}
+                          <Copy size={12} /> Copy Extracted Text
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Calculated quality: ~{Math.round(item.customQuality * 100)}%</p>
-                    </div>
-                  )}
-
-                  {/* Format selector + single download */}
-                  <div className="flex gap-1.5 mb-2">
-                    <select value={item.downloadFormat} onChange={(e) => updateItem(item.id, { downloadFormat: e.target.value })} className="flex-1 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300">
-                      {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
-                    </select>
-                    <button onClick={() => downloadSingle(item)} className="bg-sky-600 hover:bg-sky-700 text-white text-xs px-3 rounded-lg flex items-center gap-1 font-medium">
-                      <Download size={13} />
-                    </button>
-                  </div>
-
-                  {/* OCR */}
-                  <button onClick={() => runOcr(item.id)} disabled={item.ocrLoading} className="w-full text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-50 rounded-lg py-1.5 font-medium flex items-center justify-center gap-1.5">
-                    {item.ocrLoading ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />}
-                    {item.ocrLoading ? 'Reading text...' : `Extract Text (${OCR_LANGS[ocrLang]})`}
-                  </button>
-
-                  {item.ocrText && (
-                    <div className="mt-2">
-                      <textarea readOnly value={item.ocrText} className="w-full text-xs border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 rounded-lg p-2 h-20 font-mono" />
-                      <button onClick={() => copyToClipboard(item.ocrText)} className="mt-1 w-full text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg py-1 flex items-center justify-center gap-1.5"><Copy size={12} /> Copy Text</button>
-                    </div>
-                  )}
+                    )}
+                  </div>{/* end card body */}
                 </div>
               ))}
             </div>
@@ -1505,6 +1661,9 @@ function App() {
           </div>
         </section>
       </main>
+
+
+
 
       {/* ─── Floating Footer Toolbar ──────────────────────────────────────── */}
       {queue.length > 0 && (
