@@ -1,0 +1,12 @@
+{
+  "appId": "com.kamalscan.app",
+  "appName": "KamalScan",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
