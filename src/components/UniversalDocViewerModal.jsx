@@ -3,8 +3,8 @@ import {
   X, FileText, Presentation, FileCode, ZoomIn, ZoomOut, Maximize2, Minimize2,
   ChevronLeft, ChevronRight, Download, Printer, Copy, Check, Upload,
   Layers, Loader2, Sparkles, AlertCircle, Eye, ArrowRight, RotateCw,
-  Sun, Moon, BookOpen, PenTool, Image as ImageIcon, Search, Volume2, VolumeX,
-  Play, Pause, Square, FastForward
+  Sun, Moon, BookOpen, PenTool, Image as ImageIcon, Search, Volume2, Volume1, VolumeX,
+  Play, Pause, Square, FastForward, Sliders
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
@@ -13,17 +13,56 @@ import { extractPdfSearchableText } from '../utils/pdfTools'
 
 // ─── AI Multi-Language Dubbing Languages & Client-Side Translator ───────────
 const DUBBING_LANGUAGES = [
-  { id: 'en', label: 'English', sub: 'Original / Global', langCode: 'en-US', flag: '🇬🇧' },
-  { id: 'ta', label: 'Tamil (தமிழ்)', sub: 'தமிழ் குரல்', langCode: 'ta-IN', flag: '🇮🇳' },
-  { id: 'ml', label: 'Malayalam (മലയാളം)', sub: 'മലയാള ശബ്ദം', langCode: 'ml-IN', flag: '🇮🇳' },
-  { id: 'de', label: 'German (Deutsch)', sub: 'Deutsche Stimme', langCode: 'de-DE', flag: '🇩🇪' },
-  { id: 'es', label: 'Spanish (Español)', sub: 'Voz en Español', langCode: 'es-ES', flag: '🇪🇸' },
-  { id: 'hi', label: 'Hindi (हिन्दी)', sub: 'हिन्दी आवाज़', langCode: 'hi-IN', flag: '🇮🇳' },
-  { id: 'fr', label: 'French (Français)', sub: 'Voix Française', langCode: 'fr-FR', flag: '🇫🇷' },
+  { id: 'en', label: 'English', sub: 'Original / Global', langCode: 'en-US', flag: '🇬🇧', keywords: ['english', 'en-', 'en_'] },
+  { id: 'ta', label: 'Tamil (தமிழ்)', sub: 'தமிழ் குரல்', langCode: 'ta-IN', flag: '🇮🇳', keywords: ['tamil', 'ta-in', 'ta_in', 'valluvar', 'kalpana', 'ta'] },
+  { id: 'hi', label: 'Hindi (हिन्दी)', sub: 'हिन्दी आवाज़', langCode: 'hi-IN', flag: '🇮🇳', keywords: ['hindi', 'hi-in', 'hi_in', 'hemant', 'swara', 'madhur', 'ananya', 'kalpana', 'hi'] },
+  { id: 'ml', label: 'Malayalam (മലയാളം)', sub: 'മലയാള ശബ്ദം', langCode: 'ml-IN', flag: '🇮🇳', keywords: ['malayalam', 'ml-in', 'ml_in', 'ml'] },
+  { id: 'de', label: 'German (Deutsch)', sub: 'Deutsche Stimme', langCode: 'de-DE', flag: '🇩🇪', keywords: ['german', 'de-de', 'deutsch'] },
+  { id: 'es', label: 'Spanish (Español)', sub: 'Voz en Español', langCode: 'es-ES', flag: '🇪🇸', keywords: ['spanish', 'es-es', 'español'] },
+  { id: 'fr', label: 'French (Français)', sub: 'Voix Française', langCode: 'fr-FR', flag: '🇫🇷', keywords: ['french', 'fr-fr', 'français'] },
 ]
+
+export function getBestVoiceForLang(langId, voices) {
+  if (!voices || voices.length === 0) return null
+  const cfg = DUBBING_LANGUAGES.find((l) => l.id === langId)
+  if (!cfg) return null
+  const keywords = cfg.keywords || [langId]
+
+  // Filter voices matching the language code or name keywords
+  const matches = voices.filter((v) => {
+    const l = (v.lang || '').toLowerCase().replace('_', '-')
+    const n = (v.name || '').toLowerCase()
+    return (
+      l.startsWith(cfg.langCode.toLowerCase()) ||
+      l.startsWith(langId.toLowerCase()) ||
+      keywords.some((k) => n.includes(k) || l.includes(k))
+    )
+  })
+
+  if (matches.length > 0) {
+    // Prefer Natural, Google, Neural, Online, or first matched
+    const best =
+      matches.find((v) => v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Neural')) ||
+      matches[0]
+    return best
+  }
+
+  return null
+}
 
 async function translateTextForDubbing(text, targetLang) {
   if (targetLang === 'en' || !text.trim()) return text
+
+  // If text already contains the target language's native script, keep as is!
+  if (targetLang === 'ta' && /[\u0B80-\u0BFF]/.test(text)) {
+    return text
+  }
+  if (targetLang === 'hi' && /[\u0900-\u097F]/.test(text)) {
+    return text
+  }
+  if (targetLang === 'ml' && /[\u0D00-\u0D7F]/.test(text)) {
+    return text
+  }
 
   // Split into natural sentence chunks (max 300 chars to avoid API truncation)
   const sentences = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+/g) || [text]
@@ -104,6 +143,10 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   const [availableVoices, setAvailableVoices] = useState([])
   const [selectedVoiceURI, setSelectedVoiceURI] = useState(() => localStorage.getItem('kamalscan_tts_voice') || '')
   const [speechPitch, setSpeechPitch] = useState(1.0)
+  const [speechVolume, setSpeechVolume] = useState(() => {
+    const saved = localStorage.getItem('kamalscan_tts_volume')
+    return saved !== null ? parseFloat(saved) : 1.0
+  })
   const [dubbingLang, setDubbingLang] = useState(() => localStorage.getItem('kamalscan_dubbing_lang') || 'en')
   const [dubbedTranscript, setDubbedTranscript] = useState('')
   const [isTranslating, setIsTranslating] = useState(false)
@@ -143,10 +186,8 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
       const voices = window.speechSynthesis.getVoices() || []
       if (voices.length > 0) {
         setAvailableVoices(voices)
-        if (!selectedVoiceURI) {
-          const preferred = voices.find(
-            (v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.default)
-          ) || voices[0]
+        if (!selectedVoiceURI || selectedVoiceURI === '__native_lang__') {
+          const preferred = getBestVoiceForLang(dubbingLang, voices) || voices[0]
           if (preferred) {
             setSelectedVoiceURI(preferred.voiceURI)
             localStorage.setItem('kamalscan_tts_voice', preferred.voiceURI)
@@ -157,10 +198,20 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
 
     loadVoices()
     window.speechSynthesis.onvoiceschanged = loadVoices
-  }, [selectedVoiceURI])
+  }, [selectedVoiceURI, dubbingLang])
 
   const changePitch = (pitch) => {
     setSpeechPitch(pitch)
+    if (isSpeaking) {
+      stopTTS()
+      setTimeout(startTTS, 150)
+    }
+  }
+
+  const changeVolume = (volumeVal) => {
+    const clamped = Math.max(0, Math.min(1, volumeVal))
+    setSpeechVolume(clamped)
+    localStorage.setItem('kamalscan_tts_volume', clamped.toString())
     if (isSpeaking) {
       stopTTS()
       setTimeout(startTTS, 150)
@@ -180,10 +231,13 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     setDubbingLang(langId)
     localStorage.setItem('kamalscan_dubbing_lang', langId)
     // Auto-select a voice matching this language if available
-    const matching = availableVoices.find((v) => v.lang.toLowerCase().startsWith(langId.toLowerCase()))
+    const matching = getBestVoiceForLang(langId, availableVoices)
     if (matching) {
       setSelectedVoiceURI(matching.voiceURI)
       localStorage.setItem('kamalscan_tts_voice', matching.voiceURI)
+    } else {
+      setSelectedVoiceURI('__native_lang__')
+      localStorage.setItem('kamalscan_tts_voice', '__native_lang__')
     }
     if (isSpeaking) {
       stopTTS()
@@ -418,14 +472,15 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
       const utterance = new SpeechSynthesisUtterance(spokenContent)
       utterance.rate = speechSpeed
       utterance.pitch = speechPitch
+      utterance.volume = speechVolume // Adjustable voice sound (0.0 to 1.0)
       utterance.lang = targetLangConfig.langCode
 
       // If user selected a specific voice or find matching language voice
-      if (selectedVoiceURI && availableVoices.length > 0) {
+      if (selectedVoiceURI && selectedVoiceURI !== '__native_lang__' && availableVoices.length > 0) {
         const found = availableVoices.find((v) => v.voiceURI === selectedVoiceURI)
         if (found) utterance.voice = found
       } else {
-        const langVoice = availableVoices.find((v) => v.lang.toLowerCase().startsWith(dubbingLang.toLowerCase()))
+        const langVoice = getBestVoiceForLang(dubbingLang, availableVoices)
         if (langVoice) utterance.voice = langVoice
       }
 
@@ -674,6 +729,18 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   }
 
   const theme = getThemeClasses()
+  const currentLangConfig = DUBBING_LANGUAGES.find((l) => l.id === dubbingLang) || DUBBING_LANGUAGES[0]
+
+  const matchedVoices = availableVoices.filter((v) => {
+    const l = (v.lang || '').toLowerCase().replace('_', '-')
+    const n = (v.name || '').toLowerCase()
+    return (
+      l.startsWith(currentLangConfig.langCode.toLowerCase()) ||
+      l.startsWith(dubbingLang.toLowerCase()) ||
+      (currentLangConfig.keywords || []).some((k) => n.includes(k) || l.includes(k))
+    )
+  })
+  const otherVoices = availableVoices.filter((v) => !matchedVoices.includes(v))
 
   return (
     <div
@@ -1036,11 +1103,61 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
               </div>
             </div>
 
-            {/* Middle Row: AI Dubbing Language Selector Pills */}
+            {/* Middle Row 1: Adjustable Voice Sound (Volume & Output Control) */}
+            <div className="pt-2 border-t border-slate-700/80 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => changeVolume(speechVolume > 0 ? 0 : 1.0)}
+                  className="p-1 rounded-lg hover:bg-white/10 text-slate-300 transition-colors cursor-pointer"
+                  title={speechVolume === 0 ? "Unmute Sound" : "Mute Sound"}
+                >
+                  {speechVolume === 0 ? (
+                    <VolumeX size={15} className="text-red-400" />
+                  ) : speechVolume <= 0.5 ? (
+                    <Volume1 size={15} className="text-amber-400" />
+                  ) : (
+                    <Volume2 size={15} className="text-emerald-400" />
+                  )}
+                </button>
+                <span className="text-[10px] text-slate-300 font-bold shrink-0">Sound:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={speechVolume}
+                  onChange={(e) => changeVolume(parseFloat(e.target.value))}
+                  className="w-20 sm:w-28 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                  title={`Voice Volume: ${Math.round(speechVolume * 100)}%`}
+                />
+                <span className="text-[10px] font-bold text-emerald-400 w-8">
+                  {Math.round(speechVolume * 100)}%
+                </span>
+              </div>
+
+              {/* Volume Quick Presets */}
+              <div className="flex items-center gap-1 bg-black/40 rounded-xl p-0.5 text-[9px] font-semibold shrink-0">
+                {[0.5, 0.8, 1.0].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => changeVolume(v)}
+                    className={`px-1.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                      Math.abs(speechVolume - v) < 0.05
+                        ? 'bg-emerald-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {Math.round(v * 100)}%
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Middle Row 2: AI Dubbing Language Selector Pills */}
             <div className="pt-2 border-t border-slate-700/80">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1.5">
                 <span>Dubbing &amp; Voice Language:</span>
-                <span className="text-[10px] text-sky-400">Auto-Translates &amp; Reads Aloud</span>
+                <span className="text-[10px] text-sky-400 font-medium">Tamil, Hindi &amp; Global Voices</span>
               </div>
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
                 {DUBBING_LANGUAGES.map((lang) => (
@@ -1049,7 +1166,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                     onClick={() => changeDubbingLanguage(lang.id)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap border transition-all cursor-pointer ${
                       dubbingLang === lang.id
-                        ? 'bg-gradient-to-r from-sky-600 to-indigo-600 border-sky-400 text-white shadow-sm'
+                        ? 'bg-gradient-to-r from-sky-600 to-indigo-600 border-sky-400 text-white shadow-sm ring-1 ring-sky-400/50'
                         : 'bg-black/40 border-slate-700 text-slate-300 hover:bg-black/60 hover:text-white'
                     }`}
                   >
@@ -1069,14 +1186,26 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                   onChange={(e) => changeVoice(e.target.value)}
                   className="bg-black/60 text-white text-[11px] font-medium rounded-xl px-2.5 py-1 border border-slate-700 truncate w-full focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
                 >
-                  {availableVoices.length > 0 ? (
-                    availableVoices.map((v) => (
-                      <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-white">
-                        {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Default System Voice</option>
+                  <option value="__native_lang__" className="bg-slate-900 text-emerald-400 font-bold">
+                    🌟 Native {currentLangConfig.label} Voice Engine
+                  </option>
+                  {matchedVoices.length > 0 && (
+                    <optgroup label={`✨ ${currentLangConfig.label} Voices`}>
+                      {matchedVoices.map((v) => (
+                        <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-white">
+                          {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {otherVoices.length > 0 && (
+                    <optgroup label="🌐 Other Available Voices">
+                      {otherVoices.map((v) => (
+                        <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-slate-300">
+                          {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
+                        </option>
+                      ))}
+                    </optgroup>
                   )}
                 </select>
               </div>
@@ -1108,6 +1237,16 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
 
       {/* ─── Main Full-Screen Reader Canvas (Google Drive Style) ─────────── */}
       <div className={`flex-1 overflow-auto flex flex-col items-center justify-center p-2 sm:p-6 relative ${theme.viewerBg}`}>
+        {/* Prominent In-Canvas Close / Cross Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-30 px-3.5 py-1.5 rounded-full bg-slate-900/85 hover:bg-red-600 text-white text-xs font-bold shadow-2xl backdrop-blur-md flex items-center gap-1.5 transition-all cursor-pointer border border-white/20 hover:border-red-500 hover:scale-105 active:scale-95 group"
+          title="Close Document & Return to Workspace (Esc)"
+        >
+          <X size={15} className="text-red-400 group-hover:text-white transition-colors" />
+          <span>Close File</span>
+        </button>
+
         {loading && (
           <div className="flex flex-col items-center gap-3 text-slate-400">
             <Loader2 size={36} className="animate-spin text-sky-500" />
