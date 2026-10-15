@@ -719,7 +719,9 @@ function App() {
           }
         }
         if (files.length > 0) {
-          addFilesToQueue(files)
+          // Open directly in distraction-free Fullscreen Study & Document Viewer!
+          openInDocViewer(files[0])
+          addToast(`Opened ${files[0].name} in Study Viewer!`)
         }
       })
     }
@@ -835,11 +837,7 @@ function App() {
       return [...prev, ...newItems]
     })
     if (newItems.length) {
-      addToast(insertAt ? `${newItems.length} page(s) inserted at position ${insertAt}` : `${newItems.length} file(s) added! Tap to preview.`)
-      // Automatically open preview for the first uploaded file so user sees it right away!
-      if (newItems.length > 0 && queue.length === 0) {
-        setPreviewItemId(newItems[0].id)
-      }
+      addToast(insertAt ? `${newItems.length} page(s) inserted at position ${insertAt}` : `${newItems.length} file(s) added to scanner studio.`)
     }
     setInsertAt('')
   }
@@ -1291,6 +1289,18 @@ function App() {
                 <span className="hidden sm:inline">Desktop</span> Mode
               </button>
             </div>
+            {/* Study & Document Viewer Button */}
+            <button
+              onClick={() => {
+                setDocViewerFile(null)
+                setShowDocViewer(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60 transition-all shadow-xs"
+              title="Open Fullscreen Study & Document Viewer (PDF, Notes, PPTX, Word)"
+            >
+              <BookOpen size={14} className="text-amber-500" />
+              <span>Study Viewer</span>
+            </button>
 
             <button
               onClick={() => setShowInstallModal(true)}
