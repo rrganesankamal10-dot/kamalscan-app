@@ -25,6 +25,7 @@ import { SignatureModal } from './components/SignatureModal'
 import { QRBarcodeScannerModal } from './components/QRBarcodeScannerModal'
 import { IDCardScannerModal } from './components/IDCardScannerModal'
 import { UniversalDocViewerModal } from './components/UniversalDocViewerModal'
+import { InstallAppModal } from './components/InstallAppModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -627,6 +628,7 @@ function App() {
   const [showDocViewer, setShowDocViewer] = useState(false)
   const [docViewerFile, setDocViewerFile] = useState(null)
   const [vaultLoaded, setVaultLoaded] = useState(false)
+  const [showInstallModal, setShowInstallModal] = useState(false)
 
   const handleImportPagesFromViewer = (pages) => {
     const newItems = pages.map((p) =>
@@ -702,10 +704,32 @@ function App() {
     addToast(mode === 'mobile' ? 'Switched to Normal / Mobile Mode' : 'Switched to Desktop Mode')
   }
 
-  // ── PWA Install ────────────────────────────────────────────────────────────
+  // ── Web File Handling API (Open With support in PWA & Desktop) ─────────────
+  useEffect(() => {
+    if ('launchQueue' in window && 'files' in window.LaunchParams.prototype) {
+      window.launchQueue.setConsumer(async (launchParams) => {
+        if (!launchParams.files || launchParams.files.length === 0) return
+        const files = []
+        for (const handle of launchParams.files) {
+          try {
+            const file = await handle.getFile()
+            files.push(file)
+          } catch (err) {
+            console.error('Failed to get file from launchParams', err)
+          }
+        }
+        if (files.length > 0) {
+          addFilesToQueue(files)
+        }
+      })
+    }
+  }, [])
+
+
+  // ── PWA Install Prompt Listener ──────────────────────────────────────────
   useEffect(() => {
     const handlePrompt = (e) => { e.preventDefault(); setInstallPrompt(e) }
-    const handleAppInstalled = () => { setInstallPrompt(null); addToast('KamalScan app installed successfully!') }
+    const handleAppInstalled = () => { setInstallPrompt(null); addToast('KamalScan installed successfully!') }
     window.addEventListener('beforeinstallprompt', handlePrompt)
     window.addEventListener('appinstalled', handleAppInstalled)
     return () => {
@@ -714,11 +738,17 @@ function App() {
     }
   }, [])
 
-  const installApp = async () => {
-    if (!installPrompt) return
+  const installPwa = async () => {
+    if (!installPrompt) {
+      addToast('To install: open your browser menu (⋮) and tap "Add to Home screen" or "Install App"', 'info')
+      return
+    }
     installPrompt.prompt()
     const { outcome } = await installPrompt.userChoice
-    if (outcome === 'accepted') setInstallPrompt(null)
+    if (outcome === 'accepted') {
+      setInstallPrompt(null)
+      setShowInstallModal(false)
+    }
   }
 
   // ── Camera keyboard shortcut ───────────────────────────────────────────────
@@ -1262,14 +1292,13 @@ function App() {
               </button>
             </div>
 
-            {installPrompt && (
-              <button
-                onClick={installApp}
-                className="hidden md:flex items-center gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-xl transition-all shadow-xs"
-              >
-                <Smartphone size={13} /> Install App
-              </button>
-            )}
+            <button
+              onClick={() => setShowInstallModal(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-xl transition-all shadow-xs"
+              title="Install KamalScan App"
+            >
+              <Smartphone size={13} /> Install App
+            </button>
 
             <span className="hidden lg:flex text-xs font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-200/80 dark:border-emerald-800 items-center gap-1.5">
               <ShieldCheck size={14} className="text-emerald-600 dark:text-emerald-400" /> 100% Offline
@@ -1955,6 +1984,14 @@ function App() {
           onImportToQueue={handleImportPagesFromViewer}
         />
       )}
+
+      {/* 11. Unified Install App Modal */}
+      <InstallAppModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        onInstallPwa={installPwa}
+        canInstallPwa={Boolean(installPrompt)}
+      />
 
       {/* ─── Toast Notifications ──────────────────────────────────────────── */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
