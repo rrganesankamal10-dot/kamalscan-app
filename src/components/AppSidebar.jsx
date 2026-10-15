@@ -21,6 +21,7 @@ export function AppSidebar({
   onOpenSignature,
   onOpenQRScanner,
   onOpenInstallModal,
+  onOpenSectionScan,
   queueCount = 0,
 }) {
   const navItems = [
@@ -33,6 +34,18 @@ export function AppSidebar({
       badgeColor: 'bg-sky-500 text-white',
       active: true,
       onClick: () => {
+        if (window.innerWidth < 1024) onCloseMobile()
+      },
+    },
+    {
+      id: 'section_scan',
+      label: 'Section & Auto-Crop',
+      sub: 'AI Notes Edge Detector',
+      icon: <Scissors size={18} className="text-emerald-500" />,
+      badge: 'AI Model',
+      badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700',
+      onClick: () => {
+        if (onOpenSectionScan) onOpenSectionScan()
         if (window.innerWidth < 1024) onCloseMobile()
       },
     },

@@ -610,6 +610,7 @@ function App() {
   const streamRef = useRef(null)
   const dragSrcId = useRef(null)
   const editInputRef = useRef(null)
+  const sectionScanInputRef = useRef(null)
 
   // ── Always default Light Mode & persist view mode ──────────────────────────
   useEffect(() => {
@@ -795,7 +796,26 @@ function App() {
     if (item.kind === 'image') URL.revokeObjectURL(item.previewUrl)
     updateItem(item.id, { previewUrl: cropped, kind: 'pdf-page' })
     setCropItemId(null)
-    addToast('Crop applied — document straightened')
+    addToast('Note section cropped & straightened with AI!')
+  }
+
+  const handleTriggerSectionScan = () => {
+    if (queue.length > 0) {
+      setCropItemId(queue[0].id)
+    } else {
+      sectionScanInputRef.current?.click()
+    }
+  }
+
+  const handleSectionScanFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const dataUrl = await blobToDataUrl(file)
+    const newItem = makeItem(dataUrl, file.name || `Note-${Date.now()}.jpg`, 'pdf-page', file.size || estimateDataUrlSize(dataUrl))
+    setQueue((prev) => [newItem, ...prev])
+    setCropItemId(newItem.id)
+    addToast('Opened in AI Notes Auto-Crop & Section Scanner!')
+    e.target.value = ''
   }
 
   // ── Auto-Crop All (Batch) ─────────────────────────────────────────────────
@@ -1142,6 +1162,19 @@ function App() {
       const pdfH = (imgProps.height * pdfW) / imgProps.width
       pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()))
 
+      // Searchable PDF (PDF/A invisible OCR text layer)
+      if (item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
+        try {
+          pdf.internal.write('/Tr 3 Tr') // PDF rendering mode 3 = invisible selectable text
+          pdf.setFontSize(8)
+          const textLines = pdf.splitTextToSize(item.ocrText, pdfW - 16)
+          pdf.text(textLines, 8, 12)
+          pdf.internal.write('/Tr 0 Tr') // restore default fill
+        } catch (e) {
+          console.warn('PDF invisible OCR layer error:', e)
+        }
+      }
+
       if (addPageNumbers) {
         pdf.setFontSize(9)
         pdf.setTextColor(120)
@@ -1179,6 +1212,20 @@ function App() {
       const pdfW = pdf.internal.pageSize.getWidth()
       const pdfH = (imgProps.height * pdfW) / imgProps.width
       pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()))
+
+      // Searchable PDF (PDF/A invisible OCR text layer)
+      if (item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
+        try {
+          pdf.internal.write('/Tr 3 Tr') // PDF rendering mode 3 = invisible selectable text
+          pdf.setFontSize(8)
+          const textLines = pdf.splitTextToSize(item.ocrText, pdfW - 16)
+          pdf.text(textLines, 8, 12)
+          pdf.internal.write('/Tr 0 Tr')
+        } catch (e) {
+          console.warn('PDF invisible OCR layer error:', e)
+        }
+      }
+
       if (addPageNumbers) {
         pdf.setFontSize(9)
         pdf.setTextColor(120)
@@ -1262,7 +1309,7 @@ function App() {
         onOpenSignature={() => setShowSignatureModal(true)}
         onOpenQRScanner={() => setShowQRScanner(true)}
         onOpenInstallModal={() => setShowInstallModal(true)}
-        onOpenRatingModal={() => setShowRatingModal(true)}
+        onOpenSectionScan={handleTriggerSectionScan}
         queueCount={queue.length}
       />
 
@@ -1361,34 +1408,79 @@ function App() {
                 </div>
               </div>
               <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-1">
-                Upload &amp; Scan Documents
+                Scan, Browse &amp; Study Documents
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 max-w-md mx-auto">
-                Drag and drop or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b>, or <b>PowerPoint</b> files. 100% offline &amp; private.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
+                Scan notes with AI Auto-Crop, open live camera, or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b> &amp; <b>PowerPoint</b> files.
               </p>
               
-              <div className="flex gap-3 justify-center flex-wrap">
-                <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-md active:scale-98">
-                  <UploadCloud size={16} /> Browse Files
-                  <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
-                </label>
-
+              {/* 3 Dedicated Actions: Open Camera, Browse Files, Section Scan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 max-w-xl mx-auto">
+                {/* 1. Open Camera */}
                 {!cameraActive ? (
                   <button
                     onClick={startCamera}
-                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs px-5 py-2.5 rounded-xl transition-all border border-slate-200 dark:border-slate-700 active:scale-98 cursor-pointer"
+                    className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-sky-500 dark:hover:border-sky-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
                   >
-                    <Camera size={16} className="text-sky-600" /> Start Camera
+                    <div className="p-3 rounded-2xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                      <Camera size={24} />
+                    </div>
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Open Camera</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">Live note viewfinder</span>
                   </button>
                 ) : (
                   <button
                     onClick={stopCamera}
-                    className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-98 cursor-pointer"
+                    className="flex flex-col items-center justify-center p-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white shadow-md active:scale-98 transition-all cursor-pointer"
                   >
-                    <X size={16} /> Stop Camera
+                    <div className="p-3 rounded-2xl bg-white/20 mb-2">
+                      <X size={24} />
+                    </div>
+                    <span className="font-bold text-xs">Stop Camera</span>
+                    <span className="text-[10px] text-white/80 mt-0.5">Close viewfinder</span>
                   </button>
                 )}
+
+                {/* 2. Browse Files */}
+                <label className="flex flex-col items-center justify-center p-4 rounded-2xl bg-gradient-to-tr from-sky-600 via-sky-500 to-indigo-600 text-white shadow-md hover:shadow-lg hover:scale-[1.02] transition-all active:scale-98 cursor-pointer group">
+                  <div className="p-3 rounded-2xl bg-white/20 mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                    <UploadCloud size={24} />
+                  </div>
+                  <span className="font-bold text-xs">Browse Files</span>
+                  <span className="text-[10px] text-white/80 mt-0.5">PDF, Word, PPTX, Images</span>
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => addFilesToQueue(e.target.files)}
+                  />
+                </label>
+
+                {/* 3. Section Scan */}
+                <button
+                  onClick={handleTriggerSectionScan}
+                  className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 dark:hover:border-emerald-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
+                >
+                  <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                    <Scissors size={24} />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Section Scan</span>
+                    <Sparkles size={11} className="text-emerald-500" />
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5">AI Notes Auto-Crop</span>
+                </button>
               </div>
+
+              {/* Hidden file input for Section Scan */}
+              <input
+                ref={sectionScanInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleSectionScanFile}
+              />
 
               <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-[11px] text-slate-400 flex-wrap">
                 <span>Max: <b>50MB</b></span>
