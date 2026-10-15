@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Wand2, Stamp, Crop, RotateCw, Sparkles, Layers,
-  Trash2, FileSearch, Loader2, CreditCard, QrCode
+  Trash2, FileSearch, Loader2, CreditCard, QrCode, BookOpen
 } from 'lucide-react'
 import { ENHANCE_MODES } from '../utils/imageFilters'
 
@@ -16,6 +16,7 @@ export function BatchToolbar({
   isBatchOcrRunning,
   onOpenIDCardMode,
   onOpenQRScanner,
+  onOpenDocViewer,
   onClearAll,
 }) {
   const [selectedFilter, setSelectedFilter] = useState('magic')
@@ -94,6 +95,14 @@ export function BatchToolbar({
             title="Scan QR codes and barcodes"
           >
             <QrCode size={13} /> QR / Barcode
+          </button>
+
+          <button
+            onClick={onOpenDocViewer}
+            className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-900 text-amber-700 dark:text-amber-300 font-semibold text-xs border border-amber-200 dark:border-amber-700 flex items-center gap-1.5 transition-all shadow-xs"
+            title="Open Universal Document Viewer for PDF, Word, PowerPoint, and Text"
+          >
+            <BookOpen size={13} /> Document Viewer
           </button>
 
           <button

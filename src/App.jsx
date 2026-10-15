@@ -12,7 +12,7 @@ import {
   Target, Moon, Sun, Smartphone, Sparkles, Hash, ShieldCheck, Layers, Sliders, CheckCircle2,
   GripVertical, Pencil, Package, Languages, ChevronDown, BarChart3, Clock, FileDown, Archive,
   Image as ImageIcon, Maximize2, AlignCenter, AlertCircle, Monitor, PenTool,
-  CreditCard, QrCode
+  CreditCard, QrCode, BookOpen
 } from 'lucide-react'
 
 import { ENHANCE_MODES } from './utils/imageFilters'
@@ -24,6 +24,7 @@ import { BatchToolbar } from './components/BatchToolbar'
 import { SignatureModal } from './components/SignatureModal'
 import { QRBarcodeScannerModal } from './components/QRBarcodeScannerModal'
 import { IDCardScannerModal } from './components/IDCardScannerModal'
+import { UniversalDocViewerModal } from './components/UniversalDocViewerModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -623,7 +624,23 @@ function App() {
   const [isAutoCroppingAll, setIsAutoCroppingAll] = useState(false)
   const [showQRScanner, setShowQRScanner] = useState(false)
   const [showIDCardModal, setShowIDCardModal] = useState(false)
+  const [showDocViewer, setShowDocViewer] = useState(false)
+  const [docViewerFile, setDocViewerFile] = useState(null)
   const [vaultLoaded, setVaultLoaded] = useState(false)
+
+  const handleImportPagesFromViewer = (pages) => {
+    const newItems = pages.map((p) =>
+      makeItem(p.dataUrl, p.name, 'pdf-page', estimateDataUrlSize(p.dataUrl))
+    )
+    setQueue((prev) => [...prev, ...newItems])
+    setShowDocViewer(false)
+    addToast(`Imported ${newItems.length} page(s) into KamalScan scanner!`)
+  }
+
+  const openInDocViewer = (file) => {
+    setDocViewerFile(file)
+    setShowDocViewer(true)
+  }
 
   // ── Load from IndexedDB Vault on startup ──────────────────────────────────
   useEffect(() => {
@@ -750,6 +767,16 @@ function App() {
     for (const file of files) {
       const isImage = file.type.startsWith('image/')
       const isPdf = file.type === 'application/pdf'
+      const isDocx = file.name.toLowerCase().endsWith('.docx')
+      const isPptx = file.name.toLowerCase().endsWith('.pptx')
+      const isText = file.name.toLowerCase().endsWith('.txt') || file.type.startsWith('text/')
+
+      if (isDocx || isPptx || isText) {
+        openInDocViewer(file)
+        addToast(`Opened ${file.name} in Universal Document Viewer!`)
+        continue
+      }
+
       if (!isImage && !isPdf) { addToast(`Unsupported file type: ${file.name}`, 'error'); continue }
       if (runningTotal + file.size > MAX_TOTAL_MB * 1024 * 1024) {
         addToast(`Batch limit of ${MAX_TOTAL_MB}MB exceeded — "${file.name}" skipped`, 'error'); continue
@@ -1261,6 +1288,7 @@ function App() {
         {/* Feature pills */}
         <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto pb-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
           {[
+            { icon: <BookOpen size={12} className="text-amber-500" />, label: 'Universal Doc Viewer (PDF/DOCX/PPTX)', onClick: () => setShowDocViewer(true), highlight: true },
             { icon: <CreditCard size={12} className="text-purple-500" />, label: 'ID Card Dual-Side', onClick: () => setShowIDCardModal(true), highlight: true },
             { icon: <QrCode size={12} className="text-cyan-500" />, label: 'QR & Barcode Scanner', onClick: () => setShowQRScanner(true), highlight: true },
             { icon: <Sparkles size={12} className="text-sky-500" />, label: 'AI Auto-Crop' },
@@ -1275,7 +1303,11 @@ function App() {
               <button
                 key={pill.label}
                 onClick={pill.onClick}
-                className="flex-shrink-0 flex items-center gap-1.5 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 font-semibold px-2.5 py-1 rounded-lg border border-sky-200 dark:border-sky-800 shadow-xs transition-colors cursor-pointer"
+                className={`flex-shrink-0 flex items-center gap-1.5 font-semibold px-2.5 py-1 rounded-lg border shadow-xs transition-colors cursor-pointer ${
+                  pill.highlight
+                    ? 'bg-amber-50/80 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                    : 'bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800'
+                }`}
               >
                 {pill.icon} {pill.label}
               </button>
@@ -1308,15 +1340,24 @@ function App() {
             </div>
           </div>
           <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">
-            Upload or Drop Document Files
+            Universal Document Scanner &amp; Viewer
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-            Upload pictures (JPEG, PNG, WEBP) or multi-page PDFs. Processed 100% locally.
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-lg mx-auto">
+            View or scan <b>PDFs</b>, <b>Word documents (.docx)</b>, <b>PowerPoint (.pptx)</b>, and high-res images. 100% offline &amp; private.
           </p>
-          <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold text-xs sm:text-sm px-6 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-md">
-            <UploadCloud size={16} /> Browse Files
-            <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
-          </label>
+          <div className="flex gap-3 justify-center flex-wrap">
+            <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold text-xs sm:text-sm px-6 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-md">
+              <UploadCloud size={16} /> Browse &amp; Scan Files
+              <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
+            </label>
+
+            <button
+              onClick={() => setShowDocViewer(true)}
+              className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-sm"
+            >
+              <BookOpen size={16} className="text-amber-500" /> Open in Document Viewer
+            </button>
+          </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
             <span>Max batch: <b>{MAX_TOTAL_MB}MB</b></span>
             <span>•</span>
@@ -1385,6 +1426,7 @@ function App() {
               isBatchOcrRunning={batchOcrRunning}
               onOpenIDCardMode={() => setShowIDCardModal(true)}
               onOpenQRScanner={() => setShowQRScanner(true)}
+              onOpenDocViewer={() => setShowDocViewer(true)}
               onClearAll={handleClearAll}
             />
 
@@ -1899,6 +1941,18 @@ function App() {
         <IDCardScannerModal
           onCancel={() => setShowIDCardModal(false)}
           onApplyIDCard={handleAddIDCard}
+        />
+      )}
+
+      {/* 10. Universal Document Viewer Modal (PDF, Word DOCX, PowerPoint PPTX, Text) */}
+      {showDocViewer && (
+        <UniversalDocViewerModal
+          initialFile={docViewerFile}
+          onClose={() => {
+            setShowDocViewer(false)
+            setDocViewerFile(null)
+          }}
+          onImportToQueue={handleImportPagesFromViewer}
         />
       )}
 
