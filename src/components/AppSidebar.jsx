@@ -21,6 +21,7 @@ export function AppSidebar({
   onOpenSignature,
   onOpenQRScanner,
   onOpenInstallModal,
+  onOpenRatingModal,
   queueCount = 0,
 }) {
   const navItems = [
@@ -191,6 +192,18 @@ export function AppSidebar({
             className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
           >
             <Download size={14} /> Install App (APK &amp; PWA)
+          </button>
+
+          {/* Rate 5 Stars on Google Play */}
+          <button
+            onClick={() => {
+              if (onOpenRatingModal) onOpenRatingModal()
+              if (window.innerWidth < 1024) onCloseMobile()
+            }}
+            className="w-full py-1.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+            title="Rate 5 Stars on Google Play Store"
+          >
+            <span className="text-amber-500 text-xs">★★★★★</span> Rate 5 Stars
           </button>
 
           {/* Quick Toggles: Layout & Theme */}

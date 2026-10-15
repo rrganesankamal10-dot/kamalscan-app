@@ -12,7 +12,7 @@ import {
   Target, Moon, Sun, Smartphone, Sparkles, Hash, ShieldCheck, Layers, Sliders, CheckCircle2,
   GripVertical, Pencil, Package, Languages, ChevronDown, BarChart3, Clock, FileDown, Archive,
   Image as ImageIcon, Maximize2, AlignCenter, AlertCircle, Monitor, PenTool,
-  CreditCard, QrCode, BookOpen, Scissors, Menu
+  CreditCard, QrCode, BookOpen, Scissors, Menu, Share2, Star
 } from 'lucide-react'
 
 import { ENHANCE_MODES } from './utils/imageFilters'
@@ -29,6 +29,7 @@ import { InstallAppModal } from './components/InstallAppModal'
 import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
 import { CollageModal } from './components/CollageModal'
 import { AppSidebar } from './components/AppSidebar'
+import { RateAppModal } from './components/RateAppModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -548,6 +549,8 @@ function App() {
   const [showInstallModal, setShowInstallModal] = useState(false)
   const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
   const [showCollageModal, setShowCollageModal] = useState(false)
+  const [showSignatureModal, setShowSignatureModal] = useState(false)
+  const [showRatingModal, setShowRatingModal] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const handleApplyCollage = (collageDataUrl) => {
@@ -891,15 +894,143 @@ function App() {
   }
 
   // ── Apply Digital Signature ───────────────────────────────────────────────
-  const handleApplySignature = async (signatureDataUrl) => {
-    if (!signatureTargetId) return
-    const item = queue.find((f) => f.id === signatureTargetId)
+  const handleApplySignature = async (signatureDataUrl, targetId, position = 'bottom-right') => {
+    const pageId = targetId || signatureTargetId || (queue.length > 0 ? queue[0].id : null)
+    if (!pageId) return
+    const item = queue.find((f) => f.id === pageId)
     if (!item) return
-    const stamped = await applySignatureToDataUrl(item.previewUrl, signatureDataUrl)
+    const stamped = await applySignatureToDataUrl(item.previewUrl, signatureDataUrl, position)
     if (item.kind === 'image') URL.revokeObjectURL(item.previewUrl)
     updateItem(item.id, { previewUrl: stamped, kind: 'pdf-page' })
+    setShowSignatureModal(false)
     setSignatureTargetId(null)
     addToast('Signature stamped onto document!')
+  }
+
+  const handleSaveSignatureAsNewPage = async (signatureDataUrl) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1200
+    canvas.height = 1600
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    const sigImg = await loadImage(signatureDataUrl)
+    const sigW = 600
+    const sigH = (sigImg.height * sigW) / sigImg.width
+    ctx.drawImage(sigImg, (canvas.width - sigW) / 2, canvas.height * 0.65, sigW, sigH)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    const newItem = makeItem(dataUrl, `Signed-Document-${Date.now()}.jpg`, 'pdf-page', estimateDataUrlSize(dataUrl))
+    setQueue((prev) => [...prev, newItem])
+    setShowSignatureModal(false)
+    setSignatureTargetId(null)
+    addToast('New signed document page added to scanner queue!')
+  }
+
+  // ── Load High-Res Demo / Sample Document ───────────────────────────────────
+  const handleLoadSampleDocument = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1200
+    canvas.height = 1600
+    const ctx = canvas.getContext('2d')
+
+    ctx.fillStyle = '#fafaf9'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    ctx.fillStyle = '#0284c7'
+    ctx.fillRect(60, 60, canvas.width - 120, 10)
+
+    ctx.fillStyle = '#0f172a'
+    ctx.font = 'bold 50px system-ui, sans-serif'
+    ctx.fillText('KamalScan AI - Official Study Notes & Invoice', 80, 150)
+
+    ctx.fillStyle = '#64748b'
+    ctx.font = '22px system-ui, sans-serif'
+    ctx.fillText('Document ID: KS-2026-DEMO • Date: October 15, 2026 • 100% Client-Side Scan', 80, 195)
+
+    ctx.strokeStyle = '#e2e8f0'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(80, 230)
+    ctx.lineTo(canvas.width - 80, 230)
+    ctx.stroke()
+
+    ctx.fillStyle = '#0369a1'
+    ctx.font = 'bold 30px system-ui, sans-serif'
+    ctx.fillText('Chapter 4: Advanced Computer Vision & Offline Processing', 80, 290)
+
+    ctx.fillStyle = '#334155'
+    ctx.font = '25px system-ui, sans-serif'
+    const notes = [
+      '1. Pure Browser Privacy: Documents are processed locally without cloud server uploads.',
+      '2. Homography Quad Transformation: Automated edge detection straightens camera angles in milliseconds.',
+      '3. Wasm OCR Engine: High-precision character recognition directly extracts text for study & research.',
+      '4. Lossless Vector Merge: PDFs can be combined or extracted without degrading vector crispness.',
+      '5. Voice Reader (TTS): Listen aloud to study notes with customizable voices, rate, and pitch.',
+    ]
+    let curY = 350
+    for (const note of notes) {
+      ctx.fillText(note, 80, curY)
+      curY += 55
+    }
+
+    curY += 30
+    ctx.fillStyle = '#f1f5f9'
+    ctx.fillRect(80, curY, canvas.width - 160, 60)
+    ctx.fillStyle = '#0f172a'
+    ctx.font = 'bold 24px system-ui, sans-serif'
+    ctx.fillText('Feature Item', 100, curY + 38)
+    ctx.fillText('Standard Scanners', 500, curY + 38)
+    ctx.fillText('KamalScan AI Engine', 840, curY + 38)
+
+    const tableRows = [
+      ['Document Compression', 'Lossy (Pixelated)', 'Lossless Vector + Custom Target KB'],
+      ['Privacy & Security', 'Cloud Upload Server', '100% Device-Only Offline Vault'],
+      ['Digital Signature', 'Basic Raster Stamp', 'Vector Stylus & Calligraphy Studio'],
+      ['TTS Study Reader', 'Not Included', 'Multi-Voice Speed & Pitch Reader'],
+    ]
+
+    for (const [col1, col2, col3] of tableRows) {
+      curY += 60
+      ctx.strokeStyle = '#e2e8f0'
+      ctx.beginPath()
+      ctx.moveTo(80, curY)
+      ctx.lineTo(canvas.width - 80, curY)
+      ctx.stroke()
+
+      ctx.fillStyle = '#1e293b'
+      ctx.font = '22px system-ui, sans-serif'
+      ctx.fillText(col1, 100, curY + 40)
+      ctx.fillStyle = '#64748b'
+      ctx.fillText(col2, 500, curY + 40)
+      ctx.fillStyle = '#0284c7'
+      ctx.font = 'bold 22px system-ui, sans-serif'
+      ctx.fillText(col3, 840, curY + 40)
+    }
+
+    curY += 150
+    ctx.strokeStyle = '#cbd5e1'
+    ctx.setLineDash([8, 8])
+    ctx.strokeRect(canvas.width - 480, curY, 400, 160)
+    ctx.setLineDash([])
+
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = 'italic 20px system-ui, sans-serif'
+    ctx.fillText('Attestation & Signature Stamp Area', canvas.width - 450, curY + 90)
+
+    ctx.strokeStyle = '#059669'
+    ctx.lineWidth = 3
+    ctx.strokeRect(80, curY, 280, 160)
+    ctx.fillStyle = '#059669'
+    ctx.font = 'bold 22px system-ui, sans-serif'
+    ctx.fillText('VERIFIED AUTHENTIC', 100, curY + 60)
+    ctx.font = '18px system-ui, sans-serif'
+    ctx.fillText('100% Client-Side Vault', 100, curY + 95)
+    ctx.fillText('KamalScan AI Security', 100, curY + 125)
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    const newItem = makeItem(dataUrl, 'KamalScan-Sample-Notes.jpg', 'pdf-page', estimateDataUrlSize(dataUrl))
+    setQueue((prev) => [newItem, ...prev])
+    addToast('Sample Study Note loaded! Try E-Sign, OCR, or Study Viewer!')
   }
 
   // ── Move item up / down ────────────────────────────────────────────────────
@@ -1137,6 +1268,57 @@ function App() {
     const overallSaved = Math.max(0, Math.round((1 - totalCompressed / totalOriginal) * 100))
     setSummary({ totalOriginal, totalCompressed, savedPercent: overallSaved })
     addToast(`Exported ${totalPages} page(s) — saved ${overallSaved}% space`)
+    // Show friendly 5-star rating prompt after first successful multi-page export
+    if (!localStorage.getItem('kamalscan_rated')) {
+      setTimeout(() => setShowRatingModal(true), 2500)
+      localStorage.setItem('kamalscan_rated', 'true')
+    }
+  }
+
+  // ── Native Share PDF (WhatsApp, Gmail, Drive, Bluetooth) ────────────────────
+  const sharePdf = async () => {
+    if (queue.length === 0) return
+    const pageSize = PDF_PAGE_SIZES[pdfPageSize]
+    const pdf = new jsPDF({ unit: 'mm', format: [pageSize.width, pageSize.height] })
+    const totalPages = queue.length
+    setExportProgress({ current: 1, total: totalPages, name: 'Preparing for share...' })
+
+    for (let i = 0; i < totalPages; i++) {
+      const item = queue[i]
+      setExportProgress({ current: i + 1, total: totalPages, name: item.name })
+      const blob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode, item.paddingPx)
+      const dataUrl = await blobToDataUrl(blob)
+      if (i > 0) pdf.addPage([pageSize.width, pageSize.height])
+      const imgProps = pdf.getImageProperties(dataUrl)
+      const pdfW = pdf.internal.pageSize.getWidth()
+      const pdfH = (imgProps.height * pdfW) / imgProps.width
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()))
+      if (addPageNumbers) {
+        pdf.setFontSize(9)
+        pdf.setTextColor(120)
+        pdf.text(`Page ${i + 1} of ${totalPages}`, pdfW / 2, pdf.internal.pageSize.getHeight() - 6, { align: 'center' })
+      }
+    }
+
+    setExportProgress(null)
+    const pdfBlob = pdf.output('blob')
+    const fileName = `${pdfFilename || 'kamalscan-document'}.pdf`
+    const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: fileName,
+          text: 'Scanned with KamalScan AI Document Scanner',
+        })
+      } catch (e) {
+        console.log('Share canceled', e)
+      }
+    } else {
+      triggerDownload(pdfBlob, fileName)
+      addToast('Document downloaded! Share via your file manager.')
+    }
   }
 
   // ── Download all as ZIP ───────────────────────────────────────────────────
@@ -1191,9 +1373,10 @@ function App() {
         onOpenMergeSplit={() => setShowMergeSplitModal(true)}
         onOpenIDCard={() => setShowIDCardModal(true)}
         onOpenCollage={() => setShowCollageModal(true)}
-        onOpenSignature={() => setSignatureTargetId(queue.length > 0 ? queue[0].id : null)}
+        onOpenSignature={() => setShowSignatureModal(true)}
         onOpenQRScanner={() => setShowQRScanner(true)}
         onOpenInstallModal={() => setShowInstallModal(true)}
+        onOpenRatingModal={() => setShowRatingModal(true)}
         queueCount={queue.length}
       />
 
@@ -1304,6 +1487,14 @@ function App() {
                   <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
                 </label>
 
+                <button
+                  onClick={handleLoadSampleDocument}
+                  className="inline-flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-bold text-xs px-4 py-2.5 rounded-xl transition-all border border-amber-300/80 dark:border-amber-800 active:scale-98 cursor-pointer shadow-xs"
+                  title="Load sample student note & invoice instantly without uploading"
+                >
+                  <Sparkles size={15} className="text-amber-500" /> Try Sample Note
+                </button>
+
                 {!cameraActive ? (
                   <button
                     onClick={startCamera}
@@ -1369,7 +1560,19 @@ function App() {
             )}
 
             {/* Quick Feature Launchers Row (Clean, Accessible Cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <button
+                onClick={() => setShowSignatureModal(true)}
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800 group-hover:scale-105 transition-transform">
+                  <PenTool size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Digital E-Sign</h4>
+                  <p className="text-[10px] text-slate-400">Draw, Type &amp; Stamp</p>
+                </div>
+              </button>
               <button
                 onClick={() => {
                   setDocViewerFile(null);
@@ -1851,9 +2054,18 @@ function App() {
                   {zipBuilding ? 'Building ZIP...' : 'Download ZIP'}
                 </button>
                 <button
+                  onClick={sharePdf}
+                  disabled={!!exportProgress}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  title="Share PDF to WhatsApp, Gmail, Drive"
+                >
+                  <Share2 size={14} className="text-emerald-500" />
+                  <span className="hidden sm:inline">Share</span>
+                </button>
+                <button
                   onClick={processAll}
                   disabled={!!exportProgress}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-2 transition-all hover:scale-[1.02] shadow-sm"
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-2 transition-all hover:scale-[1.02] shadow-sm cursor-pointer"
                 >
                   {exportProgress ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
                   {exportProgress ? `Exporting ${exportProgress.current}/${exportProgress.total}...` : 'Export PDF'}
@@ -1894,6 +2106,7 @@ function App() {
           }}
           onOpenSignature={(id) => {
             setSignatureTargetId(id)
+            setShowSignatureModal(true)
             setPreviewItemId(null)
           }}
           onRunOcr={runOcr}
@@ -1904,12 +2117,17 @@ function App() {
       )}
 
       {/* 3. Digital Handwritten Signature Pad */}
-      {signatureTargetId && (
-        <SignatureModal
-          onCancel={() => setSignatureTargetId(null)}
-          onApplySignature={handleApplySignature}
-        />
-      )}
+      <SignatureModal
+        isOpen={showSignatureModal || Boolean(signatureTargetId)}
+        onCancel={() => {
+          setShowSignatureModal(false)
+          setSignatureTargetId(null)
+        }}
+        queuePages={queue}
+        initialTargetId={signatureTargetId}
+        onApplySignature={handleApplySignature}
+        onSaveAsNewPage={handleSaveSignatureAsNewPage}
+      />
 
       {/* 4. Collage Modal */}
       {showCollage && (
@@ -1996,6 +2214,12 @@ function App() {
         onClose={() => setShowCollageModal(false)}
         queueItems={queue}
         onApplyCollage={handleApplyCollage}
+      />
+
+      {/* 14. 5-Star Rating & Feedback Modal */}
+      <RateAppModal
+        isOpen={showRatingModal}
+        onClose={() => setShowRatingModal(false)}
       />
 
       {/* ─── Toast Notifications ──────────────────────────────────────────── */}

@@ -52,6 +52,9 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   const [speechSpeed, setSpeechSpeed] = useState(1.0)
   const [speechStatus, setSpeechStatus] = useState('')
   const [showTTSPlayer, setShowTTSPlayer] = useState(false)
+  const [availableVoices, setAvailableVoices] = useState([])
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState(() => localStorage.getItem('kamalscan_tts_voice') || '')
+  const [speechPitch, setSpeechPitch] = useState(1.0)
 
   // ─── Feature 4: In-Viewer Keyword Search ──────────────────────────────────
   const [showSearchBar, setShowSearchBar] = useState(false)
@@ -78,6 +81,47 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
       }
     }
   }, [])
+
+  // Load available system & browser voices
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices() || []
+      if (voices.length > 0) {
+        setAvailableVoices(voices)
+        if (!selectedVoiceURI) {
+          const preferred = voices.find(
+            (v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.default)
+          ) || voices[0]
+          if (preferred) {
+            setSelectedVoiceURI(preferred.voiceURI)
+            localStorage.setItem('kamalscan_tts_voice', preferred.voiceURI)
+          }
+        }
+      }
+    }
+
+    loadVoices()
+    window.speechSynthesis.onvoiceschanged = loadVoices
+  }, [selectedVoiceURI])
+
+  const changePitch = (pitch) => {
+    setSpeechPitch(pitch)
+    if (isSpeaking) {
+      stopTTS()
+      setTimeout(startTTS, 150)
+    }
+  }
+
+  const changeVoice = (voiceURI) => {
+    setSelectedVoiceURI(voiceURI)
+    localStorage.setItem('kamalscan_tts_voice', voiceURI)
+    if (isSpeaking) {
+      stopTTS()
+      setTimeout(startTTS, 150)
+    }
+  }
 
   // Handle keyboard shortcuts (Esc, Left/Right arrows, F for fullscreen, R for rotate, Ctrl+F for search)
   useEffect(() => {
@@ -284,6 +328,12 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
 
       const utterance = new SpeechSynthesisUtterance(textToSpeak)
       utterance.rate = speechSpeed
+      utterance.pitch = speechPitch
+
+      if (selectedVoiceURI && availableVoices.length > 0) {
+        const found = availableVoices.find((v) => v.voiceURI === selectedVoiceURI)
+        if (found) utterance.voice = found
+      }
 
       utterance.onstart = () => {
         setIsSpeaking(true)
@@ -814,7 +864,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
               {isSpeaking ? (
                 <button
                   onClick={pauseTTS}
-                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"
+                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white cursor-pointer"
                   title="Pause"
                 >
                   <Pause size={14} />
@@ -822,7 +872,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
               ) : (
                 <button
                   onClick={resumeTTS}
-                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
                   title="Play / Resume"
                 >
                   <Play size={14} />
@@ -835,7 +885,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                   stopTTS()
                   setShowTTSPlayer(false)
                 }}
-                className="p-1.5 rounded-lg hover:bg-white/20 text-slate-300"
+                className="p-1.5 rounded-lg hover:bg-white/20 text-slate-300 cursor-pointer"
                 title="Stop Audio"
               >
                 <Square size={13} />
@@ -847,7 +897,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                   <button
                     key={rate}
                     onClick={() => changeSpeed(rate)}
-                    className={`px-1.5 py-0.5 rounded-md transition-colors ${
+                    className={`px-1.5 py-0.5 rounded-md transition-colors cursor-pointer ${
                       speechSpeed === rate ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -855,6 +905,48 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Voice Selector & Pitch Bar */}
+          <div className="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span className="text-[10px] text-slate-400 font-bold shrink-0">Voice:</span>
+              <select
+                value={selectedVoiceURI}
+                onChange={(e) => changeVoice(e.target.value)}
+                className="bg-black/60 text-white text-[11px] font-medium rounded-lg px-2 py-1 border border-slate-700 truncate w-full focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
+              >
+                {availableVoices.length > 0 ? (
+                  availableVoices.map((v) => (
+                    <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-white">
+                      {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
+                    </option>
+                  ))
+                ) : (
+                  <option value="">Default System Voice</option>
+                )}
+              </select>
+            </div>
+
+            {/* Pitch / Tone Selector */}
+            <div className="flex items-center gap-1 bg-black/40 rounded-lg p-0.5 shrink-0 text-[10px] font-semibold">
+              <span className="text-[9px] text-slate-400 px-1">Tone:</span>
+              {[
+                { label: 'Deep', val: 0.85 },
+                { label: 'Normal', val: 1.0 },
+                { label: 'Light', val: 1.15 }
+              ].map((p) => (
+                <button
+                  key={p.val}
+                  onClick={() => changePitch(p.val)}
+                  className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                    speechPitch === p.val ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
