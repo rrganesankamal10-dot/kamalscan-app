@@ -29,7 +29,10 @@
         "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
         "application/msword": [".doc"],
         "application/vnd.ms-powerpoint": [".ppt"],
-        "text/plain": [".txt"]
+        "text/plain": [".txt"],
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/png": [".png"],
+        "image/webp": [".webp"]
       }
     }
   ]
