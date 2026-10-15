@@ -11,6 +11,55 @@ import Tesseract from 'tesseract.js'
 import { parseDocx, parsePptx, parsePlainText } from '../utils/documentParser'
 import { extractPdfSearchableText } from '../utils/pdfTools'
 
+// ─── AI Multi-Language Dubbing Languages & Client-Side Translator ───────────
+const DUBBING_LANGUAGES = [
+  { id: 'en', label: 'English', sub: 'Original / Global', langCode: 'en-US', flag: '🇬🇧' },
+  { id: 'ta', label: 'Tamil (தமிழ்)', sub: 'தமிழ் குரல்', langCode: 'ta-IN', flag: '🇮🇳' },
+  { id: 'ml', label: 'Malayalam (മലയാളം)', sub: 'മലയാള ശബ്ദം', langCode: 'ml-IN', flag: '🇮🇳' },
+  { id: 'de', label: 'German (Deutsch)', sub: 'Deutsche Stimme', langCode: 'de-DE', flag: '🇩🇪' },
+  { id: 'es', label: 'Spanish (Español)', sub: 'Voz en Español', langCode: 'es-ES', flag: '🇪🇸' },
+  { id: 'hi', label: 'Hindi (हिन्दी)', sub: 'हिन्दी आवाज़', langCode: 'hi-IN', flag: '🇮🇳' },
+  { id: 'fr', label: 'French (Français)', sub: 'Voix Française', langCode: 'fr-FR', flag: '🇫🇷' },
+]
+
+async function translateTextForDubbing(text, targetLang) {
+  if (targetLang === 'en' || !text.trim()) return text
+
+  // Split into natural sentence chunks (max 300 chars to avoid API truncation)
+  const sentences = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+/g) || [text]
+  const chunks = []
+  let cur = ''
+
+  for (const s of sentences) {
+    if ((cur + ' ' + s).length > 300) {
+      if (cur.trim()) chunks.push(cur.trim())
+      cur = s
+    } else {
+      cur += (cur ? ' ' : '') + s
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim())
+
+  const translated = []
+  for (const chunk of chunks) {
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=en|${targetLang}`
+      const res = await fetch(url)
+      const data = await res.json()
+      if (data && data.responseData && data.responseData.translatedText) {
+        translated.push(data.responseData.translatedText)
+      } else {
+        translated.push(chunk)
+      }
+    } catch (e) {
+      console.warn('Dubbing translation chunk error:', e)
+      translated.push(chunk)
+    }
+  }
+
+  return translated.join(' ')
+}
+
 export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue }) {
   const [fileData, setFileData] = useState(null)
   const [docType, setDocType] = useState('') // 'pdf' | 'docx' | 'pptx' | 'text' | 'image'
@@ -55,6 +104,10 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   const [availableVoices, setAvailableVoices] = useState([])
   const [selectedVoiceURI, setSelectedVoiceURI] = useState(() => localStorage.getItem('kamalscan_tts_voice') || '')
   const [speechPitch, setSpeechPitch] = useState(1.0)
+  const [dubbingLang, setDubbingLang] = useState(() => localStorage.getItem('kamalscan_dubbing_lang') || 'en')
+  const [dubbedTranscript, setDubbedTranscript] = useState('')
+  const [isTranslating, setIsTranslating] = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
 
   // ─── Feature 4: In-Viewer Keyword Search ──────────────────────────────────
   const [showSearchBar, setShowSearchBar] = useState(false)
@@ -117,6 +170,21 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   const changeVoice = (voiceURI) => {
     setSelectedVoiceURI(voiceURI)
     localStorage.setItem('kamalscan_tts_voice', voiceURI)
+    if (isSpeaking) {
+      stopTTS()
+      setTimeout(startTTS, 150)
+    }
+  }
+
+  const changeDubbingLanguage = (langId) => {
+    setDubbingLang(langId)
+    localStorage.setItem('kamalscan_dubbing_lang', langId)
+    // Auto-select a voice matching this language if available
+    const matching = availableVoices.find((v) => v.lang.toLowerCase().startsWith(langId.toLowerCase()))
+    if (matching) {
+      setSelectedVoiceURI(matching.voiceURI)
+      localStorage.setItem('kamalscan_tts_voice', matching.voiceURI)
+    }
     if (isSpeaking) {
       stopTTS()
       setTimeout(startTTS, 150)
@@ -326,19 +394,45 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
         return
       }
 
-      const utterance = new SpeechSynthesisUtterance(textToSpeak)
+      let spokenContent = textToSpeak
+      const targetLangConfig = DUBBING_LANGUAGES.find((l) => l.id === dubbingLang) || DUBBING_LANGUAGES[0]
+
+      if (dubbingLang !== 'en') {
+        setIsTranslating(true)
+        setSpeechStatus(`Translating to ${targetLangConfig.label} for AI Dubbing...`)
+        try {
+          const translated = await translateTextForDubbing(textToSpeak, dubbingLang)
+          if (translated && translated.trim()) {
+            spokenContent = translated
+            setDubbedTranscript(translated)
+          }
+        } catch (e) {
+          console.warn('Dubbing translation error:', e)
+        } finally {
+          setIsTranslating(false)
+        }
+      } else {
+        setDubbedTranscript(textToSpeak)
+      }
+
+      const utterance = new SpeechSynthesisUtterance(spokenContent)
       utterance.rate = speechSpeed
       utterance.pitch = speechPitch
+      utterance.lang = targetLangConfig.langCode
 
+      // If user selected a specific voice or find matching language voice
       if (selectedVoiceURI && availableVoices.length > 0) {
         const found = availableVoices.find((v) => v.voiceURI === selectedVoiceURI)
         if (found) utterance.voice = found
+      } else {
+        const langVoice = availableVoices.find((v) => v.lang.toLowerCase().startsWith(dubbingLang.toLowerCase()))
+        if (langVoice) utterance.voice = langVoice
       }
 
       utterance.onstart = () => {
         setIsSpeaking(true)
         setIsSpeechPaused(false)
-        setSpeechStatus(`Reading page ${currentPage}...`)
+        setSpeechStatus(dubbingLang !== 'en' ? `${targetLangConfig.flag} Dubbed reading in ${targetLangConfig.label}...` : `Reading page ${currentPage}...`)
       }
 
       utterance.onend = () => {
@@ -845,109 +939,169 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
         </div>
       )}
 
-      {/* ─── Floating TTS Audio Player Bar ───────────────────────────────── */}
+      {/* ─── Floating AI Dubbing & Audio Player Bar ─────────────────────── */}
       {showTTSPlayer && (
-        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-3 animate-slide-in">
-          <div className="bg-slate-900/95 dark:bg-slate-800/95 text-white rounded-2xl shadow-2xl border border-slate-700 p-2.5 flex items-center justify-between gap-2.5 backdrop-blur-md">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="p-1.5 rounded-lg bg-emerald-600 text-white shrink-0">
-                <Volume2 size={14} className={isSpeaking ? 'animate-pulse' : ''} />
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 w-full max-w-lg px-3 animate-slide-in">
+          
+          {/* Live Dubbing Subtitle / Transcript Banner */}
+          {dubbedTranscript && (
+            <div className="mb-2 bg-slate-900/95 dark:bg-slate-800/95 text-white rounded-2xl shadow-xl border border-slate-700/80 p-3 backdrop-blur-md">
+              <div className="flex items-center justify-between text-xs pb-1 mb-1 border-b border-slate-700">
+                <span className="font-bold flex items-center gap-1.5 text-sky-400">
+                  <span>{DUBBING_LANGUAGES.find((l) => l.id === dubbingLang)?.flag || '🌐'}</span>
+                  <span>{DUBBING_LANGUAGES.find((l) => l.id === dubbingLang)?.label} Transcript</span>
+                  {isTranslating && <span className="text-[10px] text-amber-400 animate-pulse">(Translating...)</span>}
+                </span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(dubbedTranscript)
+                    alert('Transcript copied to clipboard!')
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                >
+                  Copy Text
+                </button>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold truncate">Study Speaker</p>
-                <p className="text-[10px] text-slate-400 truncate">{speechStatus}</p>
+              <p className="text-xs text-slate-200 line-clamp-3 leading-relaxed">
+                {dubbedTranscript}
+              </p>
+            </div>
+          )}
+
+          <div className="bg-slate-900/95 dark:bg-slate-800/95 text-white rounded-3xl shadow-2xl border border-slate-700 p-3.5 backdrop-blur-md space-y-2.5">
+            
+            {/* Top Row: Playback status, Play/Pause, Stop, Speed */}
+            <div className="flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="p-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white shrink-0 shadow-md">
+                  <Volume2 size={16} className={isSpeaking ? 'animate-pulse' : ''} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs font-bold truncate">Study AI Speaker</p>
+                    <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full border border-emerald-500/30">
+                      {DUBBING_LANGUAGES.find((l) => l.id === dubbingLang)?.flag} {dubbingLang.toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 truncate">{speechStatus}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                {/* Play / Pause */}
+                {isSpeaking ? (
+                  <button
+                    onClick={pauseTTS}
+                    className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white cursor-pointer transition-all"
+                    title="Pause"
+                  >
+                    <Pause size={15} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={resumeTTS}
+                    className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-md transition-all active:scale-95"
+                    title="Play / Resume"
+                  >
+                    <Play size={15} />
+                  </button>
+                )}
+
+                {/* Stop */}
+                <button
+                  onClick={() => {
+                    stopTTS()
+                    setShowTTSPlayer(false)
+                  }}
+                  className="p-2 rounded-xl hover:bg-white/20 text-slate-300 cursor-pointer transition-all"
+                  title="Close Audio Player"
+                >
+                  <Square size={14} />
+                </button>
+
+                {/* Speed Switcher */}
+                <div className="flex items-center bg-black/40 rounded-xl p-0.5 ml-1 text-[10px] font-bold">
+                  {[0.75, 1.0, 1.25, 1.5].map((rate) => (
+                    <button
+                      key={rate}
+                      onClick={() => changeSpeed(rate)}
+                      className={`px-1.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                        speechSpeed === rate ? 'bg-sky-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {rate}x
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
-              {/* Play / Pause */}
-              {isSpeaking ? (
-                <button
-                  onClick={pauseTTS}
-                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white cursor-pointer"
-                  title="Pause"
-                >
-                  <Pause size={14} />
-                </button>
-              ) : (
-                <button
-                  onClick={resumeTTS}
-                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                  title="Play / Resume"
-                >
-                  <Play size={14} />
-                </button>
-              )}
-
-              {/* Stop */}
-              <button
-                onClick={() => {
-                  stopTTS()
-                  setShowTTSPlayer(false)
-                }}
-                className="p-1.5 rounded-lg hover:bg-white/20 text-slate-300 cursor-pointer"
-                title="Stop Audio"
-              >
-                <Square size={13} />
-              </button>
-
-              {/* Speed Switcher */}
-              <div className="flex items-center bg-black/40 rounded-lg p-0.5 ml-1 text-[10px] font-bold">
-                {[0.75, 1.0, 1.25, 1.5].map((rate) => (
+            {/* Middle Row: AI Dubbing Language Selector Pills */}
+            <div className="pt-2 border-t border-slate-700/80">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1.5">
+                <span>Dubbing &amp; Voice Language:</span>
+                <span className="text-[10px] text-sky-400">Auto-Translates &amp; Reads Aloud</span>
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                {DUBBING_LANGUAGES.map((lang) => (
                   <button
-                    key={rate}
-                    onClick={() => changeSpeed(rate)}
-                    className={`px-1.5 py-0.5 rounded-md transition-colors cursor-pointer ${
-                      speechSpeed === rate ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+                    key={lang.id}
+                    onClick={() => changeDubbingLanguage(lang.id)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap border transition-all cursor-pointer ${
+                      dubbingLang === lang.id
+                        ? 'bg-gradient-to-r from-sky-600 to-indigo-600 border-sky-400 text-white shadow-sm'
+                        : 'bg-black/40 border-slate-700 text-slate-300 hover:bg-black/60 hover:text-white'
                     }`}
                   >
-                    {rate}x
+                    <span>{lang.flag}</span>
+                    <span>{lang.label}</span>
                   </button>
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* Voice Selector & Pitch Bar */}
-          <div className="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <span className="text-[10px] text-slate-400 font-bold shrink-0">Voice:</span>
-              <select
-                value={selectedVoiceURI}
-                onChange={(e) => changeVoice(e.target.value)}
-                className="bg-black/60 text-white text-[11px] font-medium rounded-lg px-2 py-1 border border-slate-700 truncate w-full focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
-              >
-                {availableVoices.length > 0 ? (
-                  availableVoices.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-white">
-                      {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
-                    </option>
-                  ))
-                ) : (
-                  <option value="">Default System Voice</option>
-                )}
-              </select>
-            </div>
-
-            {/* Pitch / Tone Selector */}
-            <div className="flex items-center gap-1 bg-black/40 rounded-lg p-0.5 shrink-0 text-[10px] font-semibold">
-              <span className="text-[9px] text-slate-400 px-1">Tone:</span>
-              {[
-                { label: 'Deep', val: 0.85 },
-                { label: 'Normal', val: 1.0 },
-                { label: 'Light', val: 1.15 }
-              ].map((p) => (
-                <button
-                  key={p.val}
-                  onClick={() => changePitch(p.val)}
-                  className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
-                    speechPitch === p.val ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
-                  }`}
+            {/* Bottom Row: Voice Selector & Tone / Pitch */}
+            <div className="pt-2 border-t border-slate-700/80 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <span className="text-[10px] text-slate-400 font-bold shrink-0">Voice:</span>
+                <select
+                  value={selectedVoiceURI}
+                  onChange={(e) => changeVoice(e.target.value)}
+                  className="bg-black/60 text-white text-[11px] font-medium rounded-xl px-2.5 py-1 border border-slate-700 truncate w-full focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
                 >
-                  {p.label}
-                </button>
-              ))}
+                  {availableVoices.length > 0 ? (
+                    availableVoices.map((v) => (
+                      <option key={v.voiceURI} value={v.voiceURI} className="bg-slate-900 text-white">
+                        {v.name.replace(/Microsoft |Google /g, '')} ({v.lang})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Default System Voice</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Pitch / Tone Selector */}
+              <div className="flex items-center gap-1 bg-black/40 rounded-xl p-0.5 shrink-0 text-[10px] font-semibold">
+                <span className="text-[9px] text-slate-400 px-1">Tone:</span>
+                {[
+                  { label: 'Deep', val: 0.85 },
+                  { label: 'Normal', val: 1.0 },
+                  { label: 'Light', val: 1.15 }
+                ].map((p) => (
+                  <button
+                    key={p.val}
+                    onClick={() => changePitch(p.val)}
+                    className={`px-1.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                      speechPitch === p.val ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
+
           </div>
         </div>
       )}

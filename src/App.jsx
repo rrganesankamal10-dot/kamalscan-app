@@ -29,7 +29,6 @@ import { InstallAppModal } from './components/InstallAppModal'
 import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
 import { CollageModal } from './components/CollageModal'
 import { AppSidebar } from './components/AppSidebar'
-import { RateAppModal } from './components/RateAppModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -550,7 +549,6 @@ function App() {
   const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
   const [showCollageModal, setShowCollageModal] = useState(false)
   const [showSignatureModal, setShowSignatureModal] = useState(false)
-  const [showRatingModal, setShowRatingModal] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const handleApplyCollage = (collageDataUrl) => {
@@ -926,113 +924,6 @@ function App() {
     addToast('New signed document page added to scanner queue!')
   }
 
-  // ── Load High-Res Demo / Sample Document ───────────────────────────────────
-  const handleLoadSampleDocument = () => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 1200
-    canvas.height = 1600
-    const ctx = canvas.getContext('2d')
-
-    ctx.fillStyle = '#fafaf9'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-    ctx.fillStyle = '#0284c7'
-    ctx.fillRect(60, 60, canvas.width - 120, 10)
-
-    ctx.fillStyle = '#0f172a'
-    ctx.font = 'bold 50px system-ui, sans-serif'
-    ctx.fillText('KamalScan AI - Official Study Notes & Invoice', 80, 150)
-
-    ctx.fillStyle = '#64748b'
-    ctx.font = '22px system-ui, sans-serif'
-    ctx.fillText('Document ID: KS-2026-DEMO • Date: October 15, 2026 • 100% Client-Side Scan', 80, 195)
-
-    ctx.strokeStyle = '#e2e8f0'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(80, 230)
-    ctx.lineTo(canvas.width - 80, 230)
-    ctx.stroke()
-
-    ctx.fillStyle = '#0369a1'
-    ctx.font = 'bold 30px system-ui, sans-serif'
-    ctx.fillText('Chapter 4: Advanced Computer Vision & Offline Processing', 80, 290)
-
-    ctx.fillStyle = '#334155'
-    ctx.font = '25px system-ui, sans-serif'
-    const notes = [
-      '1. Pure Browser Privacy: Documents are processed locally without cloud server uploads.',
-      '2. Homography Quad Transformation: Automated edge detection straightens camera angles in milliseconds.',
-      '3. Wasm OCR Engine: High-precision character recognition directly extracts text for study & research.',
-      '4. Lossless Vector Merge: PDFs can be combined or extracted without degrading vector crispness.',
-      '5. Voice Reader (TTS): Listen aloud to study notes with customizable voices, rate, and pitch.',
-    ]
-    let curY = 350
-    for (const note of notes) {
-      ctx.fillText(note, 80, curY)
-      curY += 55
-    }
-
-    curY += 30
-    ctx.fillStyle = '#f1f5f9'
-    ctx.fillRect(80, curY, canvas.width - 160, 60)
-    ctx.fillStyle = '#0f172a'
-    ctx.font = 'bold 24px system-ui, sans-serif'
-    ctx.fillText('Feature Item', 100, curY + 38)
-    ctx.fillText('Standard Scanners', 500, curY + 38)
-    ctx.fillText('KamalScan AI Engine', 840, curY + 38)
-
-    const tableRows = [
-      ['Document Compression', 'Lossy (Pixelated)', 'Lossless Vector + Custom Target KB'],
-      ['Privacy & Security', 'Cloud Upload Server', '100% Device-Only Offline Vault'],
-      ['Digital Signature', 'Basic Raster Stamp', 'Vector Stylus & Calligraphy Studio'],
-      ['TTS Study Reader', 'Not Included', 'Multi-Voice Speed & Pitch Reader'],
-    ]
-
-    for (const [col1, col2, col3] of tableRows) {
-      curY += 60
-      ctx.strokeStyle = '#e2e8f0'
-      ctx.beginPath()
-      ctx.moveTo(80, curY)
-      ctx.lineTo(canvas.width - 80, curY)
-      ctx.stroke()
-
-      ctx.fillStyle = '#1e293b'
-      ctx.font = '22px system-ui, sans-serif'
-      ctx.fillText(col1, 100, curY + 40)
-      ctx.fillStyle = '#64748b'
-      ctx.fillText(col2, 500, curY + 40)
-      ctx.fillStyle = '#0284c7'
-      ctx.font = 'bold 22px system-ui, sans-serif'
-      ctx.fillText(col3, 840, curY + 40)
-    }
-
-    curY += 150
-    ctx.strokeStyle = '#cbd5e1'
-    ctx.setLineDash([8, 8])
-    ctx.strokeRect(canvas.width - 480, curY, 400, 160)
-    ctx.setLineDash([])
-
-    ctx.fillStyle = '#94a3b8'
-    ctx.font = 'italic 20px system-ui, sans-serif'
-    ctx.fillText('Attestation & Signature Stamp Area', canvas.width - 450, curY + 90)
-
-    ctx.strokeStyle = '#059669'
-    ctx.lineWidth = 3
-    ctx.strokeRect(80, curY, 280, 160)
-    ctx.fillStyle = '#059669'
-    ctx.font = 'bold 22px system-ui, sans-serif'
-    ctx.fillText('VERIFIED AUTHENTIC', 100, curY + 60)
-    ctx.font = '18px system-ui, sans-serif'
-    ctx.fillText('100% Client-Side Vault', 100, curY + 95)
-    ctx.fillText('KamalScan AI Security', 100, curY + 125)
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
-    const newItem = makeItem(dataUrl, 'KamalScan-Sample-Notes.jpg', 'pdf-page', estimateDataUrlSize(dataUrl))
-    setQueue((prev) => [newItem, ...prev])
-    addToast('Sample Study Note loaded! Try E-Sign, OCR, or Study Viewer!')
-  }
-
   // ── Move item up / down ────────────────────────────────────────────────────
   const moveItem = (id, direction) => {
     setQueue((prev) => {
@@ -1268,11 +1159,6 @@ function App() {
     const overallSaved = Math.max(0, Math.round((1 - totalCompressed / totalOriginal) * 100))
     setSummary({ totalOriginal, totalCompressed, savedPercent: overallSaved })
     addToast(`Exported ${totalPages} page(s) — saved ${overallSaved}% space`)
-    // Show friendly 5-star rating prompt after first successful multi-page export
-    if (!localStorage.getItem('kamalscan_rated')) {
-      setTimeout(() => setShowRatingModal(true), 2500)
-      localStorage.setItem('kamalscan_rated', 'true')
-    }
   }
 
   // ── Native Share PDF (WhatsApp, Gmail, Drive, Bluetooth) ────────────────────
@@ -1486,14 +1372,6 @@ function App() {
                   <UploadCloud size={16} /> Browse Files
                   <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
                 </label>
-
-                <button
-                  onClick={handleLoadSampleDocument}
-                  className="inline-flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-bold text-xs px-4 py-2.5 rounded-xl transition-all border border-amber-300/80 dark:border-amber-800 active:scale-98 cursor-pointer shadow-xs"
-                  title="Load sample student note & invoice instantly without uploading"
-                >
-                  <Sparkles size={15} className="text-amber-500" /> Try Sample Note
-                </button>
 
                 {!cameraActive ? (
                   <button
@@ -2216,13 +2094,7 @@ function App() {
         onApplyCollage={handleApplyCollage}
       />
 
-      {/* 14. 5-Star Rating & Feedback Modal */}
-      <RateAppModal
-        isOpen={showRatingModal}
-        onClose={() => setShowRatingModal(false)}
-      />
-
-      {/* ─── Toast Notifications ──────────────────────────────────────────── */}
+            {/* ─── Toast Notifications ──────────────────────────────────────────── */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {toasts.map((t) => (
           <div
