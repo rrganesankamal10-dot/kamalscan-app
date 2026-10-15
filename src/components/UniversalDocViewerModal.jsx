@@ -3,10 +3,13 @@ import {
   X, FileText, Presentation, FileCode, ZoomIn, ZoomOut, Maximize2, Minimize2,
   ChevronLeft, ChevronRight, Download, Printer, Copy, Check, Upload,
   Layers, Loader2, Sparkles, AlertCircle, Eye, ArrowRight, RotateCw,
-  Sun, Moon, BookOpen, PenTool, Image as ImageIcon, Search
+  Sun, Moon, BookOpen, PenTool, Image as ImageIcon, Search, Volume2, VolumeX,
+  Play, Pause, Square, FastForward
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
+import Tesseract from 'tesseract.js'
 import { parseDocx, parsePptx, parsePlainText } from '../utils/documentParser'
+import { extractPdfSearchableText } from '../utils/pdfTools'
 
 export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue }) {
   const [fileData, setFileData] = useState(null)
@@ -41,6 +44,22 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   // Image specific
   const [imageUrl, setImageUrl] = useState('')
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 })
+  const [imageOcrText, setImageOcrText] = useState('')
+
+  // ─── Feature 2: Audio Read-Out (TTS / Study Speaker) ──────────────────────
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [isSpeechPaused, setIsSpeechPaused] = useState(false)
+  const [speechSpeed, setSpeechSpeed] = useState(1.0)
+  const [speechStatus, setSpeechStatus] = useState('')
+  const [showTTSPlayer, setShowTTSPlayer] = useState(false)
+
+  // ─── Feature 4: In-Viewer Keyword Search ──────────────────────────────────
+  const [showSearchBar, setShowSearchBar] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([]) // { pageNumber, snippet }
+  const [currentMatchIdx, setCurrentMatchIdx] = useState(0)
+  const [isSearching, setIsSearching] = useState(false)
+  const searchInputRef = useRef(null)
 
   const modalContainerRef = useRef(null)
 
@@ -51,11 +70,36 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     }
   }, [initialFile])
 
-  // Handle keyboard shortcuts (Esc, Left/Right arrows, F for fullscreen, R for rotate)
+  // Cleanup speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
+  }, [])
+
+  // Handle keyboard shortcuts (Esc, Left/Right arrows, F for fullscreen, R for rotate, Ctrl+F for search)
   useEffect(() => {
     const handleKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        setShowSearchBar((prev) => {
+          const next = !prev
+          if (next) setTimeout(() => searchInputRef.current?.focus(), 100)
+          return next
+        })
+        return
+      }
+
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      if (e.key === 'Escape' && !isFullscreen) onClose()
+      if (e.key === 'Escape' && !isFullscreen) {
+        if (showSearchBar) {
+          setShowSearchBar(false)
+        } else {
+          onClose()
+        }
+      }
       if (e.key === 'ArrowLeft') prevPage()
       if (e.key === 'ArrowRight') nextPage()
       if (e.key === 'f' || e.key === 'F') toggleFullscreen()
@@ -66,9 +110,9 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [currentPage, totalPages, isFullscreen, zoom])
+  }, [currentPage, totalPages, isFullscreen, zoom, showSearchBar])
 
-  // Re-render PDF page when page or zoom changes
+  // Re-render PDF page when page, zoom, or rotation changes
   useEffect(() => {
     if (docType === 'pdf' && pdfDoc) {
       renderPdfPage(currentPage, zoom, rotation)
@@ -83,6 +127,10 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     setCurrentPage(1)
     setZoom(1)
     setRotation(0)
+    setImageOcrText('')
+    setSearchResults([])
+    setSearchQuery('')
+    stopTTS()
 
     const name = file.name.toLowerCase()
 
@@ -117,7 +165,6 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
         setImageUrl(url)
         setTotalPages(1)
 
-        // Read natural image dimensions
         const img = new Image()
         img.onload = () => {
           setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
@@ -154,17 +201,22 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
   }
 
   const prevPage = () => {
-    if (currentPage > 1) setCurrentPage((p) => p - 1)
+    if (currentPage > 1) {
+      setCurrentPage((p) => p - 1)
+      if (isSpeaking) stopTTS()
+    }
   }
 
   const nextPage = () => {
-    if (currentPage < totalPages) setCurrentPage((p) => p + 1)
+    if (currentPage < totalPages) {
+      setCurrentPage((p) => p + 1)
+      if (isSpeaking) stopTTS()
+    }
   }
 
   const handleZoomIn = () => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))
   const handleZoomOut = () => setZoom((z) => Math.max(0.4, +(z - 0.25).toFixed(2)))
   const handleResetZoom = () => setZoom(1)
-  const handleFitWidth = () => setZoom(1.35)
 
   const rotateClockwise = () => {
     setRotation((r) => (r + 90) % 360)
@@ -177,6 +229,224 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
     }
+  }
+
+  // ─── TTS Functions ──────────────────────────────────────────────────────────
+  const startTTS = async () => {
+    if (!('speechSynthesis' in window)) {
+      alert('Text-to-Speech is not supported in this browser.')
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    setShowTTSPlayer(true)
+    setSpeechStatus('Preparing text to read aloud...')
+
+    let textToSpeak = ''
+
+    try {
+      if (docType === 'docx') {
+        const tmp = document.createElement('div')
+        tmp.innerHTML = docxHtml
+        textToSpeak = tmp.innerText || tmp.textContent
+      } else if (docType === 'pptx') {
+        const slide = pptxSlides[currentPage - 1]
+        textToSpeak = `Slide ${currentPage}. ${slide?.title || ''}. ${slide?.notes || ''}`
+      } else if (docType === 'text') {
+        textToSpeak = plainText
+      } else if (docType === 'pdf' && pdfDoc) {
+        const page = await pdfDoc.getPage(currentPage)
+        const textContent = await page.getTextContent()
+        textToSpeak = textContent.items.map((item) => item.str).join(' ')
+        if (!textToSpeak.trim()) {
+          setSpeechStatus('Scanned PDF detected. Running on-device OCR...')
+          const canvas = pdfCanvasRef.current
+          if (canvas) {
+            const { data: { text } } = await Tesseract.recognize(canvas.toDataURL('image/jpeg'), 'eng')
+            textToSpeak = text
+          }
+        }
+      } else if (docType === 'image' && imageUrl) {
+        if (imageOcrText) {
+          textToSpeak = imageOcrText
+        } else {
+          setSpeechStatus('Reading handwritten/typed notes with OCR...')
+          const { data: { text } } = await Tesseract.recognize(imageUrl, 'eng')
+          setImageOcrText(text)
+          textToSpeak = text
+        }
+      }
+
+      if (!textToSpeak.trim()) {
+        setSpeechStatus('No readable text found on this page.')
+        return
+      }
+
+      const utterance = new SpeechSynthesisUtterance(textToSpeak)
+      utterance.rate = speechSpeed
+
+      utterance.onstart = () => {
+        setIsSpeaking(true)
+        setIsSpeechPaused(false)
+        setSpeechStatus(`Reading page ${currentPage}...`)
+      }
+
+      utterance.onend = () => {
+        setIsSpeaking(false)
+        setIsSpeechPaused(false)
+        setSpeechStatus('Finished reading.')
+      }
+
+      utterance.onerror = (e) => {
+        console.warn('Speech error:', e)
+        setIsSpeaking(false)
+        setSpeechStatus('Speech synthesis ended.')
+      }
+
+      window.speechSynthesis.speak(utterance)
+    } catch (err) {
+      console.error(err)
+      setSpeechStatus('Could not read text aloud: ' + err.message)
+    }
+  }
+
+  const pauseTTS = () => {
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.pause()
+      setIsSpeechPaused(true)
+      setIsSpeaking(false)
+      setSpeechStatus('Speech paused')
+    }
+  }
+
+  const resumeTTS = () => {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume()
+      setIsSpeechPaused(false)
+      setIsSpeaking(true)
+      setSpeechStatus(`Reading page ${currentPage}...`)
+    } else {
+      startTTS()
+    }
+  }
+
+  const stopTTS = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+    }
+    setIsSpeaking(false)
+    setIsSpeechPaused(false)
+    setSpeechStatus('')
+  }
+
+  const changeSpeed = (rate) => {
+    setSpeechSpeed(rate)
+    if (isSpeaking) {
+      stopTTS()
+      setTimeout(startTTS, 150)
+    }
+  }
+
+  // ─── Search Functions ───────────────────────────────────────────────────────
+  const handleExecuteSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+
+    setIsSearching(true)
+    const query = searchQuery.toLowerCase()
+    const matches = []
+
+    try {
+      if (docType === 'docx') {
+        const tmp = document.createElement('div')
+        tmp.innerHTML = docxHtml
+        const text = tmp.innerText || ''
+        const regex = new RegExp(query, 'gi')
+        let match
+        while ((match = regex.exec(text)) !== null) {
+          const start = Math.max(0, match.index - 30)
+          const end = Math.min(text.length, match.index + query.length + 30)
+          matches.push({
+            pageNumber: 1,
+            snippet: '...' + text.slice(start, end).replace(/\n/g, ' ') + '...',
+          })
+        }
+      } else if (docType === 'pptx') {
+        pptxSlides.forEach((slide, idx) => {
+          const fullText = (slide.title + ' ' + slide.notes).toLowerCase()
+          if (fullText.includes(query)) {
+            matches.push({
+              pageNumber: idx + 1,
+              snippet: `Slide ${idx + 1}: ${slide.title}`,
+            })
+          }
+        })
+      } else if (docType === 'text') {
+        const lines = plainText.split('\n')
+        lines.forEach((line, idx) => {
+          if (line.toLowerCase().includes(query)) {
+            matches.push({
+              pageNumber: 1,
+              snippet: `Line ${idx + 1}: ${line.trim().slice(0, 80)}`,
+            })
+          }
+        })
+      } else if (docType === 'pdf' && pdfDoc) {
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+          const page = await pdfDoc.getPage(i)
+          const textContent = await page.getTextContent()
+          const pageText = textContent.items.map((it) => it.str).join(' ')
+          if (pageText.toLowerCase().includes(query)) {
+            const idx = pageText.toLowerCase().indexOf(query)
+            const start = Math.max(0, idx - 30)
+            const end = Math.min(pageText.length, idx + query.length + 30)
+            matches.push({
+              pageNumber: i,
+              snippet: `p.${i}: ...${pageText.slice(start, end)}...`,
+            })
+          }
+        }
+      } else if (docType === 'image' && imageUrl) {
+        let text = imageOcrText
+        if (!text) {
+          const { data } = await Tesseract.recognize(imageUrl, 'eng')
+          text = data.text
+          setImageOcrText(text)
+        }
+        if (text.toLowerCase().includes(query)) {
+          matches.push({
+            pageNumber: 1,
+            snippet: `Found in notes: "...${text.slice(0, 100)}..."`,
+          })
+        }
+      }
+
+      setSearchResults(matches)
+      setCurrentMatchIdx(0)
+      if (matches.length > 0) {
+        setCurrentPage(matches[0].pageNumber)
+      }
+    } catch (e) {
+      console.error('Search error:', e)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const nextMatch = () => {
+    if (!searchResults.length) return
+    const nextIdx = (currentMatchIdx + 1) % searchResults.length
+    setCurrentMatchIdx(nextIdx)
+    setCurrentPage(searchResults[nextIdx].pageNumber)
+  }
+
+  const prevMatch = () => {
+    if (!searchResults.length) return
+    const prevIdx = (currentMatchIdx - 1 + searchResults.length) % searchResults.length
+    setCurrentMatchIdx(prevIdx)
+    setCurrentPage(searchResults[prevIdx].pageNumber)
   }
 
   const copyDocText = () => {
@@ -194,17 +464,6 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
-  }
-
-  const downloadOriginal = () => {
-    if (docType === 'image' && imageUrl) {
-      const a = document.createElement('a')
-      a.href = imageUrl
-      a.download = fileName || 'document_image.jpg'
-      a.click()
-    } else {
-      window.print()
-    }
   }
 
   // Switch to Scanner / Editor Studio
@@ -294,7 +553,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="font-bold text-sm truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+              <h3 className="font-bold text-sm truncate max-w-[180px] sm:max-w-xs md:max-w-md">
                 {fileName || 'KamalScan Study & Document Viewer'}
               </h3>
               {docType && (
@@ -309,7 +568,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
           </div>
         </div>
 
-        {/* Center: Page Controls & Reading Presets */}
+        {/* Center: Page Controls & Study Audio & Search */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Page navigation for PDF & PPTX */}
           {totalPages > 1 && (
@@ -361,6 +620,44 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
               <RotateCw size={15} />
             </button>
           )}
+
+          {/* 🔍 Search In Document Button (Ctrl+F) */}
+          <button
+            onClick={() => {
+              setShowSearchBar((prev) => {
+                const next = !prev
+                if (next) setTimeout(() => searchInputRef.current?.focus(), 100)
+                return next
+              })
+            }}
+            className={`p-2 rounded-xl transition-colors ${
+              showSearchBar ? 'bg-sky-600 text-white' : 'hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold'
+            }`}
+            title="Search In Document / OCR Keywords (Ctrl+F)"
+          >
+            <Search size={15} />
+          </button>
+
+          {/* 🔊 Audio Read-Out (TTS / Study Speaker) Button */}
+          <button
+            onClick={() => {
+              if (isSpeaking) {
+                pauseTTS()
+              } else if (isSpeechPaused) {
+                resumeTTS()
+              } else {
+                startTTS()
+              }
+            }}
+            className={`p-2 rounded-xl transition-colors ${
+              isSpeaking
+                ? 'bg-emerald-600 text-white animate-pulse'
+                : 'hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold'
+            }`}
+            title="Listen Aloud (Text-to-Speech Study Speaker)"
+          >
+            <Volume2 size={15} />
+          </button>
 
           {/* Eye-Care Study Themes */}
           <div className="hidden sm:flex items-center rounded-xl p-0.5 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs">
@@ -422,6 +719,146 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
           </button>
         </div>
       </div>
+
+      {/* ─── Floating In-Viewer Keyword Search Bar ────────────────────────── */}
+      {showSearchBar && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-full max-w-md p-2 animate-slide-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex items-center gap-2">
+            <Search size={16} className="text-slate-400 ml-2" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleExecuteSearch()
+              }}
+              placeholder="Search keyword in document / notes..."
+              className="flex-1 bg-transparent border-none text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none"
+            />
+
+            {searchResults.length > 0 && (
+              <span className="text-[11px] font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap">
+                {currentMatchIdx + 1} of {searchResults.length}
+              </span>
+            )}
+
+            <button
+              onClick={handleExecuteSearch}
+              disabled={isSearching || !searchQuery.trim()}
+              className="px-2.5 py-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all disabled:opacity-40"
+            >
+              {isSearching ? <Loader2 size={12} className="animate-spin" /> : 'Find'}
+            </button>
+
+            {searchResults.length > 0 && (
+              <div className="flex items-center gap-0.5 border-l border-slate-200 dark:border-slate-700 pl-1">
+                <button
+                  onClick={prevMatch}
+                  className="p-1 hover:text-sky-600 text-slate-500"
+                  title="Previous Match"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <button
+                  onClick={nextMatch}
+                  className="p-1 hover:text-sky-600 text-slate-500"
+                  title="Next Match"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setShowSearchBar(false)
+                setSearchResults([])
+              }}
+              className="p-1 text-slate-400 hover:text-slate-600"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Match Snippet Pill */}
+          {searchResults.length > 0 && searchResults[currentMatchIdx] && (
+            <div className="mt-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 text-white text-[11px] font-medium shadow-lg backdrop-blur-xs flex items-center justify-between">
+              <span className="truncate">
+                {searchResults[currentMatchIdx].snippet}
+              </span>
+              <span className="text-[10px] opacity-75 shrink-0 ml-2">
+                Page {searchResults[currentMatchIdx].pageNumber}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Floating TTS Audio Player Bar ───────────────────────────────── */}
+      {showTTSPlayer && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-3 animate-slide-in">
+          <div className="bg-slate-900/95 dark:bg-slate-800/95 text-white rounded-2xl shadow-2xl border border-slate-700 p-2.5 flex items-center justify-between gap-2.5 backdrop-blur-md">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="p-1.5 rounded-lg bg-emerald-600 text-white shrink-0">
+                <Volume2 size={14} className={isSpeaking ? 'animate-pulse' : ''} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">Study Speaker</p>
+                <p className="text-[10px] text-slate-400 truncate">{speechStatus}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Play / Pause */}
+              {isSpeaking ? (
+                <button
+                  onClick={pauseTTS}
+                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"
+                  title="Pause"
+                >
+                  <Pause size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={resumeTTS}
+                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+                  title="Play / Resume"
+                >
+                  <Play size={14} />
+                </button>
+              )}
+
+              {/* Stop */}
+              <button
+                onClick={() => {
+                  stopTTS()
+                  setShowTTSPlayer(false)
+                }}
+                className="p-1.5 rounded-lg hover:bg-white/20 text-slate-300"
+                title="Stop Audio"
+              >
+                <Square size={13} />
+              </button>
+
+              {/* Speed Switcher */}
+              <div className="flex items-center bg-black/40 rounded-lg p-0.5 ml-1 text-[10px] font-bold">
+                {[0.75, 1.0, 1.25, 1.5].map((rate) => (
+                  <button
+                    key={rate}
+                    onClick={() => changeSpeed(rate)}
+                    className={`px-1.5 py-0.5 rounded-md transition-colors ${
+                      speechSpeed === rate ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {rate}x
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Main Full-Screen Reader Canvas (Google Drive Style) ─────────── */}
       <div className={`flex-1 overflow-auto flex flex-col items-center justify-center p-2 sm:p-6 relative ${theme.viewerBg}`}>
@@ -554,7 +991,7 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
               <span>•</span>
             </>
           )}
-          <span className="hidden sm:inline">Press <b>F</b> for Fullscreen • <b>R</b> to Rotate • <b>+</b> / <b>-</b> to Zoom</span>
+          <span className="hidden sm:inline">Press <b>Ctrl+F</b> to Search • <b>F</b> for Fullscreen • <b>R</b> to Rotate</span>
         </div>
 
         <div className="flex items-center gap-2">

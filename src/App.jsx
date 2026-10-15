@@ -12,7 +12,7 @@ import {
   Target, Moon, Sun, Smartphone, Sparkles, Hash, ShieldCheck, Layers, Sliders, CheckCircle2,
   GripVertical, Pencil, Package, Languages, ChevronDown, BarChart3, Clock, FileDown, Archive,
   Image as ImageIcon, Maximize2, AlignCenter, AlertCircle, Monitor, PenTool,
-  CreditCard, QrCode, BookOpen
+  CreditCard, QrCode, BookOpen, Scissors
 } from 'lucide-react'
 
 import { ENHANCE_MODES } from './utils/imageFilters'
@@ -26,6 +26,7 @@ import { QRBarcodeScannerModal } from './components/QRBarcodeScannerModal'
 import { IDCardScannerModal } from './components/IDCardScannerModal'
 import { UniversalDocViewerModal } from './components/UniversalDocViewerModal'
 import { InstallAppModal } from './components/InstallAppModal'
+import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -629,6 +630,7 @@ function App() {
   const [docViewerFile, setDocViewerFile] = useState(null)
   const [vaultLoaded, setVaultLoaded] = useState(false)
   const [showInstallModal, setShowInstallModal] = useState(false)
+  const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
 
   const handleImportPagesFromViewer = (pages) => {
     const newItems = pages.map((p) =>
@@ -1302,6 +1304,16 @@ function App() {
               <span>Study Viewer</span>
             </button>
 
+            {/* PDF Merge & Split Studio Button */}
+            <button
+              onClick={() => setShowMergeSplitModal(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-300/60 dark:border-indigo-700/60 transition-all shadow-xs"
+              title="Merge multiple PDFs or Split & Extract Pages"
+            >
+              <Scissors size={14} className="text-indigo-500" />
+              <span>Merge / Split PDF</span>
+            </button>
+
             <button
               onClick={() => setShowInstallModal(true)}
               className="flex items-center gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-xl transition-all shadow-xs"
@@ -1328,6 +1340,7 @@ function App() {
         <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto pb-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
           {[
             { icon: <BookOpen size={12} className="text-amber-500" />, label: 'Universal Doc Viewer (PDF/DOCX/PPTX)', onClick: () => setShowDocViewer(true), highlight: true },
+            { icon: <Scissors size={12} className="text-indigo-500" />, label: 'PDF Merge & Split Studio', onClick: () => setShowMergeSplitModal(true), highlight: true },
             { icon: <CreditCard size={12} className="text-purple-500" />, label: 'ID Card Dual-Side', onClick: () => setShowIDCardModal(true), highlight: true },
             { icon: <QrCode size={12} className="text-cyan-500" />, label: 'QR & Barcode Scanner', onClick: () => setShowQRScanner(true), highlight: true },
             { icon: <Sparkles size={12} className="text-sky-500" />, label: 'AI Auto-Crop' },
@@ -1395,6 +1408,13 @@ function App() {
               className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-sm"
             >
               <BookOpen size={16} className="text-amber-500" /> Open in Document Viewer
+            </button>
+
+            <button
+              onClick={() => setShowMergeSplitModal(true)}
+              className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-sm"
+            >
+              <Scissors size={16} className="text-indigo-500" /> PDF Merge / Split
             </button>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
@@ -2001,6 +2021,13 @@ function App() {
         onClose={() => setShowInstallModal(false)}
         onInstallPwa={installPwa}
         canInstallPwa={Boolean(installPrompt)}
+      />
+
+      {/* 12. PDF Merge & Split Studio Modal */}
+      <PDFMergeSplitModal
+        isOpen={showMergeSplitModal}
+        onClose={() => setShowMergeSplitModal(false)}
+        onImportToQueue={handleImportPagesFromViewer}
       />
 
       {/* ─── Toast Notifications ──────────────────────────────────────────── */}

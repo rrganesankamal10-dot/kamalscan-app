@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Wand2, Stamp, Crop, RotateCw, Sparkles, Layers,
-  Trash2, FileSearch, Loader2, CreditCard, QrCode, BookOpen
+  Trash2, FileSearch, Loader2, CreditCard, QrCode, BookOpen, Scissors
 } from 'lucide-react'
 import { ENHANCE_MODES } from '../utils/imageFilters'
 
@@ -17,6 +17,7 @@ export function BatchToolbar({
   onOpenIDCardMode,
   onOpenQRScanner,
   onOpenDocViewer,
+  onOpenMergeSplit,
   onClearAll,
 }) {
   const [selectedFilter, setSelectedFilter] = useState('magic')
@@ -103,6 +104,14 @@ export function BatchToolbar({
             title="Open Universal Document Viewer for PDF, Word, PowerPoint, and Text"
           >
             <BookOpen size={13} /> Document Viewer
+          </button>
+
+          <button
+            onClick={onOpenMergeSplit}
+            className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-semibold text-xs border border-indigo-200 dark:border-indigo-700 flex items-center gap-1.5 transition-all shadow-xs"
+            title="Lossless PDF Merge and Split Studio"
+          >
+            <Scissors size={13} /> Merge / Split PDF
           </button>
 
           <button
