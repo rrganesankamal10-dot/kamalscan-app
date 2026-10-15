@@ -12,7 +12,7 @@ import {
   Target, Moon, Sun, Smartphone, Sparkles, Hash, ShieldCheck, Layers, Sliders, CheckCircle2,
   GripVertical, Pencil, Package, Languages, ChevronDown, BarChart3, Clock, FileDown, Archive,
   Image as ImageIcon, Maximize2, AlignCenter, AlertCircle, Monitor, PenTool,
-  CreditCard, QrCode, BookOpen, Scissors
+  CreditCard, QrCode, BookOpen, Scissors, Menu
 } from 'lucide-react'
 
 import { ENHANCE_MODES } from './utils/imageFilters'
@@ -28,6 +28,7 @@ import { UniversalDocViewerModal } from './components/UniversalDocViewerModal'
 import { InstallAppModal } from './components/InstallAppModal'
 import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
 import { CollageModal } from './components/CollageModal'
+import { AppSidebar } from './components/AppSidebar'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -547,6 +548,7 @@ function App() {
   const [showInstallModal, setShowInstallModal] = useState(false)
   const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
   const [showCollageModal, setShowCollageModal] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const handleApplyCollage = (collageDataUrl) => {
     const newItem = makeItem(collageDataUrl, `Collage-${Date.now()}.jpg`, 'image', estimateDataUrlSize(collageDataUrl))
@@ -976,15 +978,28 @@ function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       streamRef.current = stream
-      videoRef.current.srcObject = stream
       setCameraActive(true)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch(() => {})
+      }
     } catch (err) { addToast('Camera access denied: ' + err.message, 'error') }
   }
 
   const stopCamera = () => {
     if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null }
+    if (videoRef.current) { videoRef.current.srcObject = null }
     setCameraActive(false)
   }
+
+  useEffect(() => {
+    if (cameraActive && videoRef.current && streamRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current
+        videoRef.current.play().catch(() => {})
+      }
+    }
+  }, [cameraActive])
 
   const captureFrame = () => {
     playShutterSound()
@@ -1161,225 +1176,129 @@ function App() {
   const previewItem = queue.find((f) => f.id === previewItemId)
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans pb-28">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col">
 
-      {/* ─── Header ───────────────────────────────────────────────────────── */}
-      <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 py-3.5 mb-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          {/* Logo & title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-600 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-sky-500/20">
-              <FileText size={22} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-bold text-lg text-slate-900 dark:text-white leading-tight">KamalScan</h1>
-                <span className="text-[10px] font-semibold bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 px-2 py-0.5 rounded-full border border-sky-200/60 dark:border-sky-800">
-                  AI v2.0
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
-                Client-Side Document Scanner, Converter &amp; HD Enhancer
-              </p>
-            </div>
-          </div>
+      {/* ─── Sleek Navigation Sidebar ───────────────────────────────────── */}
+      <AppSidebar
+        isOpen={isSidebarOpen}
+        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        onCloseMobile={() => setIsSidebarOpen(false)}
+        viewMode={viewMode}
+        onToggleViewMode={toggleViewMode}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        onOpenDocViewer={() => setShowDocViewer(true)}
+        onOpenMergeSplit={() => setShowMergeSplitModal(true)}
+        onOpenIDCard={() => setShowIDCardModal(true)}
+        onOpenCollage={() => setShowCollageModal(true)}
+        onOpenSignature={() => setSignatureTargetId(queue.length > 0 ? queue[0].id : null)}
+        onOpenQRScanner={() => setShowQRScanner(true)}
+        onOpenInstallModal={() => setShowInstallModal(true)}
+        queueCount={queue.length}
+      />
 
-          {/* Right Controls: Mode Toggle, Privacy, Theme */}
-          <div className="flex items-center gap-2">
-            {/* Normal Mode vs Desktop Mode Toggle */}
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700">
+      {/* ─── Main Content Container (Padded left on desktop for fixed sidebar) ─── */}
+      <div className="lg:pl-72 flex-1 flex flex-col min-h-screen w-full pb-28">
+
+      {/* ─── Modern Workspace Top App Bar ───────────────────────────────── */}
+        <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 py-3">
+          <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+            
+            {/* Left: Mobile hamburger menu & branding */}
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => toggleViewMode('mobile')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  viewMode === 'mobile'
-                    ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-                title="Normal / Mobile Phone Layout"
+                onClick={() => setIsSidebarOpen(true)}
+                className="lg:hidden p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-xs cursor-pointer"
+                title="Open Navigation Menu"
+              >
+                <Menu size={20} />
+              </button>
+
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-cyan-400 flex items-center justify-center text-white shadow-md shadow-sky-500/20">
+                  <FileText size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="font-bold text-base text-slate-900 dark:text-white leading-tight">KamalScan</h1>
+                    <span className="text-[10px] font-semibold bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 px-2 py-0.5 rounded-full border border-sky-200/60 dark:border-sky-800">
+                      AI v2.0
+                    </span>
+                    {queue.length > 0 && (
+                      <span className="text-[11px] font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full">
+                        {queue.length} {queue.length === 1 ? 'page' : 'pages'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 hidden sm:block">
+                    100% Client-Side Scanner, Converter &amp; HD Enhancer
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Quick Action Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setDocViewerFile(null)
+                  setShowDocViewer(true)
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60 transition-all shadow-xs cursor-pointer"
+                title="Open Fullscreen Study & Document Viewer"
+              >
+                <BookOpen size={14} className="text-amber-500" />
+                <span className="hidden sm:inline">Study Viewer</span>
+              </button>
+
+              <button
+                onClick={() => setShowInstallModal(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-xl transition-all shadow-xs cursor-pointer"
+                title="Install KamalScan App (APK & PWA)"
               >
                 <Smartphone size={13} />
-                <span className="hidden sm:inline">Normal</span> Mode
+                <span className="hidden sm:inline">Install App</span>
               </button>
+
               <button
-                onClick={() => toggleViewMode('desktop')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  viewMode === 'desktop'
-                    ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-                title="Expansive Desktop Layout"
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-xs cursor-pointer"
+                title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               >
-                <Monitor size={13} />
-                <span className="hidden sm:inline">Desktop</span> Mode
+                {darkMode ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-slate-600" />}
               </button>
             </div>
-            {/* Study & Document Viewer Button */}
-            <button
-              onClick={() => {
-                setDocViewerFile(null)
-                setShowDocViewer(true)
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60 transition-all shadow-xs"
-              title="Open Fullscreen Study & Document Viewer (PDF, Notes, PPTX, Word)"
-            >
-              <BookOpen size={14} className="text-amber-500" />
-              <span>Study Viewer</span>
-            </button>
-
-            {/* PDF Merge & Split Studio Button */}
-            <button
-              onClick={() => setShowMergeSplitModal(true)}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-300/60 dark:border-indigo-700/60 transition-all shadow-xs"
-              title="Merge multiple PDFs or Split & Extract Pages"
-            >
-              <Scissors size={14} className="text-indigo-500" />
-              <span>Merge / Split PDF</span>
-            </button>
-
-            <button
-              onClick={() => setShowInstallModal(true)}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-xl transition-all shadow-xs"
-              title="Install KamalScan App"
-            >
-              <Smartphone size={13} /> Install App
-            </button>
-
-            <span className="hidden lg:flex text-xs font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-200/80 dark:border-emerald-800 items-center gap-1.5">
-              <ShieldCheck size={14} className="text-emerald-600 dark:text-emerald-400" /> 100% Offline
-            </span>
-
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-xs"
-              title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {darkMode ? <Sun size={17} className="text-amber-400" /> : <Moon size={17} className="text-slate-600" />}
-            </button>
           </div>
-        </div>
-
-        {/* Feature pills */}
-        <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto pb-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
-          {[
-            { icon: <BookOpen size={12} className="text-amber-500" />, label: 'Universal Doc Viewer (PDF/DOCX/PPTX)', onClick: () => setShowDocViewer(true), highlight: true },
-            { icon: <Scissors size={12} className="text-indigo-500" />, label: 'PDF Merge & Split Studio', onClick: () => setShowMergeSplitModal(true), highlight: true },
-            { icon: <CreditCard size={12} className="text-purple-500" />, label: 'ID Card Dual-Side', onClick: () => setShowIDCardModal(true), highlight: true },
-            { icon: <LayoutGrid size={12} className="text-cyan-500" />, label: 'Multi-Page Collage', onClick: () => setShowCollageModal(true), highlight: true },
-            { icon: <QrCode size={12} className="text-cyan-500" />, label: 'QR & Barcode Scanner', onClick: () => setShowQRScanner(true), highlight: true },
-            { icon: <Sparkles size={12} className="text-sky-500" />, label: 'AI Auto-Crop' },
-            { icon: <Wand2 size={12} className="text-indigo-500" />, label: 'HD Color Filters' },
-            { icon: <Eye size={12} className="text-emerald-500" />, label: 'Touch to Preview' },
-            { icon: <Stamp size={12} className="text-rose-500" />, label: 'Apply to All' },
-            { icon: <PenTool size={12} className="text-amber-500" />, label: 'Digital E-Sign' },
-            { icon: <ScanText size={12} className="text-cyan-500" />, label: 'Offline OCR' },
-            { icon: <Archive size={12} className="text-violet-500" />, label: 'Multi-Format ZIP' },
-          ].map((pill) => (
-            pill.onClick ? (
-              <button
-                key={pill.label}
-                onClick={pill.onClick}
-                className={`flex-shrink-0 flex items-center gap-1.5 font-semibold px-2.5 py-1 rounded-lg border shadow-xs transition-colors cursor-pointer ${
-                  pill.highlight
-                    ? 'bg-amber-50/80 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                    : 'bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800'
-                }`}
-              >
-                {pill.icon} {pill.label}
-              </button>
-            ) : (
-              <span key={pill.label} className="flex-shrink-0 flex items-center gap-1 bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded-lg border border-slate-200/80 dark:border-slate-800 shadow-xs">
-                {pill.icon} {pill.label}
-              </span>
-            )
-          ))}
-        </div>
-      </header>
+        </header>
 
       {/* ─── Main Content Container ────────────────────────────────────────── */}
       <main className={`relative mx-auto px-4 sm:px-6 space-y-6 ${viewMode === 'desktop' ? 'max-w-7xl' : 'max-w-2xl'}`}>
 
-        {/* ─── 3-Zone Studio Command Center ─────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-
-          {/* ◄◄ LEFT ZONE (col-span-3): 📑 PDF & Study Tools */}
-          <div className="order-2 lg:order-1 lg:col-span-3 space-y-4 flex flex-col justify-between">
-            {/* PDF Merge & Split Studio Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800">
-                    <Scissors size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">PDF Merge &amp; Split</h3>
-                    <p className="text-[11px] text-slate-400">Lossless Vector Page Tools</p>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Combine multiple PDF files into one single document, or extract and rotate specific pages.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowMergeSplitModal(true)}
-                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
-              >
-                <Scissors size={14} /> Open Merge &amp; Split Studio
-              </button>
-            </div>
-
-            {/* Universal Study Viewer Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800">
-                    <BookOpen size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">Study &amp; Doc Viewer</h3>
-                    <p className="text-[11px] text-slate-400">PDF • DOCX • PPTX • Notes</p>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Full-screen distraction-free reader with Sepia Eye-Care, TTS Audio Read Aloud &amp; Ctrl+F Search.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowDocViewer(true)}
-                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
-              >
-                <BookOpen size={14} /> Open Study Viewer
-              </button>
-            </div>
-          </div>
-
-          {/* ▲▲ CENTER ZONE (col-span-6): 📤 Universal Upload & Live Scanner Hub */}
-          <div className="order-1 lg:order-2 lg:col-span-6 space-y-4">
-            {/* Upload Zone */}
+        {/* Universal Hero Upload & Live Scanner Hub */}
+          <div className="space-y-4">
             <section
               onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleFileDrop}
-              className={`rounded-3xl border-2 border-dashed p-6 sm:p-8 text-center transition-all shadow-sm ${
+              className={`rounded-3xl border-2 border-dashed p-6 sm:p-10 text-center transition-all shadow-sm ${
                 dragOver
                   ? 'border-sky-500 bg-sky-50/80 dark:bg-sky-950/40 scale-[1.01]'
                   : 'border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900'
               }`}
             >
-              <div className="flex justify-center mb-2.5">
-                <div className={`p-3.5 rounded-2xl border transition-all ${dragOver ? 'bg-sky-100 border-sky-300 dark:bg-sky-900' : 'bg-sky-50 dark:bg-sky-950 border-sky-100 dark:border-sky-900'}`}>
-                  <UploadCloud size={32} className="text-sky-600 dark:text-sky-400" />
+              <div className="flex justify-center mb-3">
+                <div className={`p-4 rounded-2xl border transition-all ${dragOver ? 'bg-sky-100 border-sky-300 dark:bg-sky-900' : 'bg-sky-50 dark:bg-sky-950 border-sky-100 dark:border-sky-900'}`}>
+                  <UploadCloud size={36} className="text-sky-600 dark:text-sky-400" />
                 </div>
               </div>
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 mb-1">
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-1">
                 Upload &amp; Scan Documents
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-sm mx-auto">
-                Drag and drop or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b>, or <b>PowerPoint</b> files. 100% offline.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 max-w-md mx-auto">
+                Drag and drop or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b>, or <b>PowerPoint</b> files. 100% offline &amp; private.
               </p>
               
-              <div className="flex gap-2.5 justify-center flex-wrap">
+              <div className="flex gap-3 justify-center flex-wrap">
                 <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-md active:scale-98">
                   <UploadCloud size={16} /> Browse Files
                   <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
@@ -1388,21 +1307,21 @@ function App() {
                 {!cameraActive ? (
                   <button
                     onClick={startCamera}
-                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs px-5 py-2.5 rounded-xl transition-all border border-slate-200 dark:border-slate-700 active:scale-98"
+                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs px-5 py-2.5 rounded-xl transition-all border border-slate-200 dark:border-slate-700 active:scale-98 cursor-pointer"
                   >
                     <Camera size={16} className="text-sky-600" /> Start Camera
                   </button>
                 ) : (
                   <button
                     onClick={stopCamera}
-                    className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-98"
+                    className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-98 cursor-pointer"
                   >
                     <X size={16} /> Stop Camera
                   </button>
                 )}
               </div>
 
-              <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-[11px] text-slate-400 flex-wrap">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-[11px] text-slate-400 flex-wrap">
                 <span>Max: <b>50MB</b></span>
                 <span>•</span>
                 <div className="flex items-center gap-1.5">
@@ -1421,76 +1340,92 @@ function App() {
             {cameraActive && (
               <section className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200/80 dark:border-slate-800 p-4">
                 <div className="relative w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center shadow-inner aspect-[4/3]">
-                  <video ref={videoRef} autoPlay playsInline onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)} className="absolute inset-0 w-full h-full object-contain" />
+                  <video
+                    ref={(el) => {
+                      videoRef.current = el;
+                      if (el && streamRef.current && el.srcObject !== streamRef.current) {
+                        el.srcObject = streamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    muted
+                    onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)}
+                    className="absolute inset-0 w-full h-full object-contain"
+                  />
                   <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 text-white text-[11px] px-2.5 py-1 rounded-full backdrop-blur-xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Scanner
                   </div>
                   <div className="absolute inset-8 border-2 border-dashed border-white/60 rounded-xl pointer-events-none" />
                   <button
                     onClick={captureFrame}
-                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-xl flex items-center gap-2 active:scale-95"
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-xl flex items-center gap-2 active:scale-95 cursor-pointer"
                   >
                     <Camera size={16} /> Capture Page (Space)
                   </button>
                 </div>
               </section>
             )}
-          </div>
 
-          {/* ►► RIGHT ZONE (col-span-3): 🪪 ID Card & Collage Studio */}
-          <div className="order-3 lg:order-3 lg:col-span-3 space-y-4 flex flex-col justify-between">
-            {/* ID Card Dual-Side Scanner Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800">
-                    <CreditCard size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">ID Card Dual-Side</h3>
-                    <p className="text-[11px] text-slate-400">Front + Back on 1 Page</p>
-                  </div>
+            {/* Quick Feature Launchers Row (Clean, Accessible Cards) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <button
+                onClick={() => {
+                  setDocViewerFile(null);
+                  setShowDocViewer(true);
+                }}
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800 group-hover:scale-105 transition-transform">
+                  <BookOpen size={18} />
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Capture front and back of Aadhaar, ID card, or Driver's license and combine onto 1 clean sheet.
-                </p>
-              </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Study Viewer</h4>
+                  <p className="text-[10px] text-slate-400">PDF • Notes • TTS</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowMergeSplitModal(true)}
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800 group-hover:scale-105 transition-transform">
+                  <Scissors size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Merge &amp; Split</h4>
+                  <p className="text-[10px] text-slate-400">Vector Tools</p>
+                </div>
+              </button>
 
               <button
                 onClick={() => setShowIDCardModal(true)}
-                className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
               >
-                <CreditCard size={14} /> Scan Dual-Side ID
-              </button>
-            </div>
-
-            {/* Collage Studio Card */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 border border-cyan-200/60 dark:border-cyan-800">
-                    <LayoutGrid size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">Document Collage</h3>
-                    <p className="text-[11px] text-slate-400">2-in-1 • 4-in-1 • 6-in-1</p>
-                  </div>
+                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800 group-hover:scale-105 transition-transform">
+                  <CreditCard size={18} />
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Combine 2, 4, or 6 slides, photos, or receipts into a single printable A4 page.
-                </p>
-              </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">ID Card</h4>
+                  <p className="text-[10px] text-slate-400">Front + Back on 1 Page</p>
+                </div>
+              </button>
 
               <button
                 onClick={() => setShowCollageModal(true)}
-                className="w-full py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-cyan-300 dark:hover:border-cyan-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
               >
-                <LayoutGrid size={14} /> Make Document Collage
+                <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 border border-cyan-200/60 dark:border-cyan-800 group-hover:scale-105 transition-transform">
+                  <LayoutGrid size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Doc Collage</h4>
+                  <p className="text-[10px] text-slate-400">2, 4, 6 Handouts</p>
+                </div>
               </button>
             </div>
           </div>
-
-        </div>
 
         {/* ─── Page Queue & Batch Actions ─────────────────────────────────── */}
         {queue.length > 0 && (
@@ -1877,7 +1812,7 @@ function App() {
 
       {/* ─── Floating Footer Toolbar ──────────────────────────────────────── */}
       {queue.length > 0 && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-2xl z-40">
+        <footer className="fixed bottom-0 left-0 right-0 lg:left-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-2xl z-40">
           <div className="max-w-7xl mx-auto px-4 py-3">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mb-2">
               <span className="flex items-center gap-1"><Layers size={12} /> <b className="text-slate-800 dark:text-slate-100">{queue.length}</b> pages</span>
@@ -1928,6 +1863,8 @@ function App() {
           </div>
         </footer>
       )}
+
+            </div>
 
       {/* ─── Modals ───────────────────────────────────────────────────────── */}
       {/* 1. Enhanced Crop Modal with Offline AI Edge Detection */}
