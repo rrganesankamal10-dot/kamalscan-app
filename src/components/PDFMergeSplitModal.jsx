@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   X, Layers, Scissors, Upload, Download, ArrowUp, ArrowDown, Trash2, RotateCw,
   CheckCircle2, FileText, Sparkles, Loader2, Plus, AlertCircle, Eye, ArrowRight,
@@ -8,6 +8,15 @@ import { mergePdfFiles, splitAndOrganizePdf, renderPdfThumbnails } from '../util
 
 export function PDFMergeSplitModal({ isOpen, onClose, onImportToQueue }) {
   if (!isOpen) return null
+
+  // Escape key to close
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   const [activeTab, setActiveTab] = useState('merge') // 'merge' | 'split'
   const [loading, setLoading] = useState(false)
@@ -217,7 +226,12 @@ export function PDFMergeSplitModal({ isOpen, onClose, onImportToQueue }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-md animate-fade-in select-none">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-md animate-fade-in select-none"
+    >
       <div className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] overflow-hidden animate-scale-up">
         {/* ─── Top Header & Mode Tabs ───────────────────────────────────────── */}
         <div className="px-6 py-4 bg-linear-to-r from-sky-600 via-indigo-600 to-purple-600 text-white flex items-center justify-between flex-shrink-0">
@@ -255,11 +269,15 @@ export function PDFMergeSplitModal({ isOpen, onClose, onImportToQueue }) {
             </div>
 
             <button
-              onClick={onClose}
-              className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 transition-colors ml-2"
-              title="Close"
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+              className="p-2 rounded-xl bg-white/20 hover:bg-red-500 hover:text-white text-white font-bold transition-all shadow-sm ml-2 flex items-center justify-center active:scale-95"
+              title="Close (Esc)"
+              aria-label="Close modal"
             >
-              <X size={18} />
+              <X size={20} strokeWidth={2.5} />
             </button>
           </div>
         </div>
@@ -509,6 +527,12 @@ export function PDFMergeSplitModal({ isOpen, onClose, onImportToQueue }) {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
+            >
+              Close
+            </button>
             {activeTab === 'merge' ? (
               <>
                 <button

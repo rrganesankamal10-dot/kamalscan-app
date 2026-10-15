@@ -27,6 +27,7 @@ import { IDCardScannerModal } from './components/IDCardScannerModal'
 import { UniversalDocViewerModal } from './components/UniversalDocViewerModal'
 import { InstallAppModal } from './components/InstallAppModal'
 import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
+import { CollageModal } from './components/CollageModal'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -404,93 +405,7 @@ function BatchOcrModal({ text, onClose, onCopy }) {
   )
 }
 
-// ─── Collage Modal ────────────────────────────────────────────────────────────
-function CollageModal({ queue, onCancel, onGenerate }) {
-  const [selectedIds, setSelectedIds] = useState([])
-  const [layout, setLayout] = useState('2x2')
-  const [generating, setGenerating] = useState(false)
 
-  const toggle = (id) => {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
-
-  const layouts = ['1x2', '2x1', '2x2', '3x3']
-
-  const handleGenerate = async () => {
-    if (selectedIds.length === 0) return
-    setGenerating(true)
-    const [cols, rows] = layout.split('x').map(Number)
-    const cellSize = 500
-    const gutter = 8
-    const canvas = document.createElement('canvas')
-    canvas.width = cellSize * cols + gutter * (cols + 1)
-    canvas.height = cellSize * rows + gutter * (rows + 1)
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-    const items = queue.filter((q) => selectedIds.includes(q.id))
-    for (let i = 0; i < Math.min(items.length, cols * rows); i++) {
-      const img = await loadImage(items[i].previewUrl)
-      const col = i % cols
-      const row = Math.floor(i / cols)
-      const cellX = gutter + col * (cellSize + gutter)
-      const cellY = gutter + row * (cellSize + gutter)
-      const scale = Math.max(cellSize / img.width, cellSize / img.height)
-      const w = img.width * scale
-      const h = img.height * scale
-      const dx = cellX + (cellSize - w) / 2
-      const dy = cellY + (cellSize - h) / 2
-      ctx.save()
-      ctx.beginPath()
-      ctx.rect(cellX, cellY, cellSize, cellSize)
-      ctx.clip()
-      ctx.drawImage(img, dx, dy, w, h)
-      ctx.restore()
-    }
-    setGenerating(false)
-    onGenerate(canvas.toDataURL('image/png'))
-  }
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800">
-        <div className="p-5 pb-2 flex-shrink-0">
-          <h3 className="font-semibold text-slate-800 dark:text-slate-100 mb-1">Create Collage</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Pick images and a grid layout.</p>
-        </div>
-        <div className="px-5 flex-shrink-0">
-          <div className="flex gap-2 mb-3">
-            {layouts.map((l) => (
-              <button key={l} onClick={() => setLayout(l)} className={`flex-1 text-xs py-2 rounded-md font-medium ${layout === l ? 'bg-sky-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>{l}</button>
-            ))}
-          </div>
-        </div>
-        <div className="px-5 overflow-y-auto flex-1">
-          <div className="grid grid-cols-3 gap-2">
-            {queue.map((item) => (
-              <button key={item.id} onClick={() => toggle(item.id)} className="relative rounded-lg overflow-hidden border-2" style={{ borderColor: selectedIds.includes(item.id) ? '#0284c7' : 'transparent' }}>
-                <img src={item.previewUrl} alt={item.name} className="w-full h-20 object-cover" />
-                {selectedIds.includes(item.id) && (
-                  <div className="absolute inset-0 bg-sky-600/30 flex items-center justify-center">
-                    <div className="bg-sky-600 text-white rounded-full p-1"><Check size={14} /></div>
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex gap-2 p-5 pt-3 flex-shrink-0 border-t border-slate-100 dark:border-slate-800">
-          <button onClick={onCancel} className="flex-1 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium">Cancel</button>
-          <button onClick={handleGenerate} disabled={generating || selectedIds.length === 0} className="flex-1 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-medium flex items-center justify-center gap-2">
-            {generating && <Loader2 size={14} className="animate-spin" />}
-            {generating ? 'Building...' : `Generate (${selectedIds.length} selected)`}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Watermark Modal ──────────────────────────────────────────────────────────
 function WatermarkModal({ scopeLabel, onCancel, onApply }) {
@@ -631,6 +546,13 @@ function App() {
   const [vaultLoaded, setVaultLoaded] = useState(false)
   const [showInstallModal, setShowInstallModal] = useState(false)
   const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
+  const [showCollageModal, setShowCollageModal] = useState(false)
+
+  const handleApplyCollage = (collageDataUrl) => {
+    const newItem = makeItem(collageDataUrl, `Collage-${Date.now()}.jpg`, 'image', estimateDataUrlSize(collageDataUrl))
+    setQueue((prev) => [...prev, newItem])
+    addToast('Document collage created and added to scanner queue!')
+  }
 
   const handleImportPagesFromViewer = (pages) => {
     const newItems = pages.map((p) =>
@@ -1342,6 +1264,7 @@ function App() {
             { icon: <BookOpen size={12} className="text-amber-500" />, label: 'Universal Doc Viewer (PDF/DOCX/PPTX)', onClick: () => setShowDocViewer(true), highlight: true },
             { icon: <Scissors size={12} className="text-indigo-500" />, label: 'PDF Merge & Split Studio', onClick: () => setShowMergeSplitModal(true), highlight: true },
             { icon: <CreditCard size={12} className="text-purple-500" />, label: 'ID Card Dual-Side', onClick: () => setShowIDCardModal(true), highlight: true },
+            { icon: <LayoutGrid size={12} className="text-cyan-500" />, label: 'Multi-Page Collage', onClick: () => setShowCollageModal(true), highlight: true },
             { icon: <QrCode size={12} className="text-cyan-500" />, label: 'QR & Barcode Scanner', onClick: () => setShowQRScanner(true), highlight: true },
             { icon: <Sparkles size={12} className="text-sky-500" />, label: 'AI Auto-Crop' },
             { icon: <Wand2 size={12} className="text-indigo-500" />, label: 'HD Color Filters' },
@@ -1375,99 +1298,199 @@ function App() {
       {/* ─── Main Content Container ────────────────────────────────────────── */}
       <main className={`relative mx-auto px-4 sm:px-6 space-y-6 ${viewMode === 'desktop' ? 'max-w-7xl' : 'max-w-2xl'}`}>
 
-        {/* ─── Upload Zone ─────────────────────────────────────────────── */}
-        <section
-          onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleFileDrop}
-          className={`rounded-2xl border-2 border-dashed p-8 sm:p-10 text-center transition-all shadow-xs ${
-            dragOver
-              ? 'border-sky-500 bg-sky-50/80 dark:bg-sky-950/40 scale-[1.01]'
-              : 'border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900'
-          }`}
-        >
-          <div className="flex justify-center mb-3">
-            <div className={`p-4 rounded-2xl border transition-all ${dragOver ? 'bg-sky-100 border-sky-300 dark:bg-sky-900 dark:border-sky-700' : 'bg-sky-50 dark:bg-sky-950 border-sky-100 dark:border-sky-900'}`}>
-              <UploadCloud size={34} className="text-sky-600 dark:text-sky-400" />
-            </div>
-          </div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">
-            Universal Document Scanner &amp; Viewer
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-lg mx-auto">
-            View or scan <b>PDFs</b>, <b>Word documents (.docx)</b>, <b>PowerPoint (.pptx)</b>, and high-res images. 100% offline &amp; private.
-          </p>
-          <div className="flex gap-3 justify-center flex-wrap">
-            <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold text-xs sm:text-sm px-6 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-md">
-              <UploadCloud size={16} /> Browse &amp; Scan Files
-              <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
-            </label>
+        {/* ─── 3-Zone Studio Command Center ─────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
 
-            <button
-              onClick={() => setShowDocViewer(true)}
-              className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-sm"
-            >
-              <BookOpen size={16} className="text-amber-500" /> Open in Document Viewer
-            </button>
-
-            <button
-              onClick={() => setShowMergeSplitModal(true)}
-              className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition-all hover:scale-[1.02] shadow-sm"
-            >
-              <Scissors size={16} className="text-indigo-500" /> PDF Merge / Split
-            </button>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
-            <span>Max batch: <b>{MAX_TOTAL_MB}MB</b></span>
-            <span>•</span>
-            <div className="flex items-center gap-1.5">
-              <span>Insert at position:</span>
-              <input
-                type="number" min="1" value={insertAt}
-                onChange={(e) => setInsertAt(e.target.value)}
-                placeholder="end"
-                className="w-16 text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-300"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* ─── Live Camera Scanner ──────────────────────────────────────── */}
-        <section className="bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 p-5 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-base flex items-center gap-2 text-slate-800 dark:text-slate-100">
-              <Camera size={18} className="text-sky-600 dark:text-sky-400" /> Live Document Camera
-            </h2>
-            <span className="text-xs text-slate-400 dark:text-slate-500">HD Scanner</span>
-          </div>
-          <div className="relative w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center shadow-inner" style={{ aspectRatio: videoAspect || '3 / 4' }}>
-            {!cameraActive && (
-              <div className="text-center text-slate-400 px-6 py-12">
-                <Camera size={44} className="mx-auto mb-2 opacity-50 text-slate-300" />
-                <p className="text-xs font-medium text-slate-300">Camera preview inactive.</p>
-                <p className="text-[11px] text-slate-400 mt-1">Click "Start Camera" to scan documents using webcam / phone camera.</p>
-              </div>
-            )}
-            <video ref={videoRef} autoPlay playsInline onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)} className={`absolute inset-0 w-full h-full object-contain ${cameraActive ? 'block' : 'hidden'}`} />
-            {cameraActive && (
-              <>
-                <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 text-white text-[11px] px-2.5 py-1 rounded-full backdrop-blur-xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />Live Viewport
+          {/* ◄◄ LEFT ZONE (col-span-3): 📑 PDF & Study Tools */}
+          <div className="order-2 lg:order-1 lg:col-span-3 space-y-4 flex flex-col justify-between">
+            {/* PDF Merge & Split Studio Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800">
+                    <Scissors size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">PDF Merge &amp; Split</h3>
+                    <p className="text-[11px] text-slate-400">Lossless Vector Page Tools</p>
+                  </div>
                 </div>
-                <div className="absolute inset-8 border-2 border-dashed border-white/60 rounded-lg pointer-events-none" />
-                <div className="absolute bottom-3 right-3 bg-black/60 text-white text-[10px] px-2.5 py-1 rounded-full backdrop-blur-xs">Press Space to capture</div>
-              </>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Combine multiple PDF files into one single document, or extract and rotate specific pages.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowMergeSplitModal(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+              >
+                <Scissors size={14} /> Open Merge &amp; Split Studio
+              </button>
+            </div>
+
+            {/* Universal Study Viewer Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800">
+                    <BookOpen size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">Study &amp; Doc Viewer</h3>
+                    <p className="text-[11px] text-slate-400">PDF • DOCX • PPTX • Notes</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Full-screen distraction-free reader with Sepia Eye-Care, TTS Audio Read Aloud &amp; Ctrl+F Search.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowDocViewer(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+              >
+                <BookOpen size={14} /> Open Study Viewer
+              </button>
+            </div>
+          </div>
+
+          {/* ▲▲ CENTER ZONE (col-span-6): 📤 Universal Upload & Live Scanner Hub */}
+          <div className="order-1 lg:order-2 lg:col-span-6 space-y-4">
+            {/* Upload Zone */}
+            <section
+              onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleFileDrop}
+              className={`rounded-3xl border-2 border-dashed p-6 sm:p-8 text-center transition-all shadow-sm ${
+                dragOver
+                  ? 'border-sky-500 bg-sky-50/80 dark:bg-sky-950/40 scale-[1.01]'
+                  : 'border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900'
+              }`}
+            >
+              <div className="flex justify-center mb-2.5">
+                <div className={`p-3.5 rounded-2xl border transition-all ${dragOver ? 'bg-sky-100 border-sky-300 dark:bg-sky-900' : 'bg-sky-50 dark:bg-sky-950 border-sky-100 dark:border-sky-900'}`}>
+                  <UploadCloud size={32} className="text-sky-600 dark:text-sky-400" />
+                </div>
+              </div>
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-100 mb-1">
+                Upload &amp; Scan Documents
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-sm mx-auto">
+                Drag and drop or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b>, or <b>PowerPoint</b> files. 100% offline.
+              </p>
+              
+              <div className="flex gap-2.5 justify-center flex-wrap">
+                <label className="inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl transition-all shadow-md active:scale-98">
+                  <UploadCloud size={16} /> Browse Files
+                  <input type="file" accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv" multiple className="hidden" onChange={(e) => addFilesToQueue(e.target.files)} />
+                </label>
+
+                {!cameraActive ? (
+                  <button
+                    onClick={startCamera}
+                    className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs px-5 py-2.5 rounded-xl transition-all border border-slate-200 dark:border-slate-700 active:scale-98"
+                  >
+                    <Camera size={16} className="text-sky-600" /> Start Camera
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopCamera}
+                    className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-98"
+                  >
+                    <X size={16} /> Stop Camera
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-[11px] text-slate-400 flex-wrap">
+                <span>Max: <b>50MB</b></span>
+                <span>•</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Insert at:</span>
+                  <input
+                    type="number" min="1" value={insertAt}
+                    onChange={(e) => setInsertAt(e.target.value)}
+                    placeholder="end"
+                    className="w-12 text-center text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 rounded-lg px-1.5 py-0.5"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* Live Camera Viewport */}
+            {cameraActive && (
+              <section className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200/80 dark:border-slate-800 p-4">
+                <div className="relative w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center shadow-inner aspect-[4/3]">
+                  <video ref={videoRef} autoPlay playsInline onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)} className="absolute inset-0 w-full h-full object-contain" />
+                  <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 text-white text-[11px] px-2.5 py-1 rounded-full backdrop-blur-xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Scanner
+                  </div>
+                  <div className="absolute inset-8 border-2 border-dashed border-white/60 rounded-xl pointer-events-none" />
+                  <button
+                    onClick={captureFrame}
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-xl flex items-center gap-2 active:scale-95"
+                  >
+                    <Camera size={16} /> Capture Page (Space)
+                  </button>
+                </div>
+              </section>
             )}
           </div>
-          <div className="flex justify-center gap-3 mt-4">
-            <button onClick={cameraActive ? stopCamera : startCamera} className="px-4 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium transition-colors">
-              {cameraActive ? 'Stop Camera' : 'Start Camera'}
-            </button>
-            <button onClick={captureFrame} disabled={!cameraActive} className="px-5 py-2 text-xs rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold transition-all hover:scale-[1.02] flex items-center gap-2 shadow-sm">
-              <Camera size={14} /> Capture Page
-            </button>
+
+          {/* ►► RIGHT ZONE (col-span-3): 🪪 ID Card & Collage Studio */}
+          <div className="order-3 lg:order-3 lg:col-span-3 space-y-4 flex flex-col justify-between">
+            {/* ID Card Dual-Side Scanner Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800">
+                    <CreditCard size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">ID Card Dual-Side</h3>
+                    <p className="text-[11px] text-slate-400">Front + Back on 1 Page</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Capture front and back of Aadhaar, ID card, or Driver's license and combine onto 1 clean sheet.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowIDCardModal(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+              >
+                <CreditCard size={14} /> Scan Dual-Side ID
+              </button>
+            </div>
+
+            {/* Collage Studio Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4 h-full">
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 border border-cyan-200/60 dark:border-cyan-800">
+                    <LayoutGrid size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">Document Collage</h3>
+                    <p className="text-[11px] text-slate-400">2-in-1 • 4-in-1 • 6-in-1</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Combine 2, 4, or 6 slides, photos, or receipts into a single printable A4 page.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowCollageModal(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-98 cursor-pointer"
+              >
+                <LayoutGrid size={14} /> Make Document Collage
+              </button>
+            </div>
           </div>
-        </section>
+
+        </div>
 
         {/* ─── Page Queue & Batch Actions ─────────────────────────────────── */}
         {queue.length > 0 && (
@@ -2028,6 +2051,14 @@ function App() {
         isOpen={showMergeSplitModal}
         onClose={() => setShowMergeSplitModal(false)}
         onImportToQueue={handleImportPagesFromViewer}
+      />
+
+      {/* 13. Multi-Page Document Collage Modal */}
+      <CollageModal
+        isOpen={showCollageModal}
+        onClose={() => setShowCollageModal(false)}
+        queueItems={queue}
+        onApplyCollage={handleApplyCollage}
       />
 
       {/* ─── Toast Notifications ──────────────────────────────────────────── */}
