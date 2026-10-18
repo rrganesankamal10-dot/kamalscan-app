@@ -12,11 +12,12 @@ import {
   Target, Moon, Sun, Smartphone, Sparkles, Hash, ShieldCheck, Layers, Sliders, CheckCircle2,
   GripVertical, Pencil, Package, Languages, ChevronDown, BarChart3, Clock, FileDown, Archive,
   Image as ImageIcon, Maximize2, AlignCenter, AlertCircle, Monitor, PenTool,
-  CreditCard, QrCode, BookOpen, Scissors, Menu, Share2, Star
+  CreditCard, QrCode, BookOpen, Scissors, Menu, Share2, Star, Folder
 } from 'lucide-react'
 
 import { ENHANCE_MODES } from './utils/imageFilters'
 import { detectDocumentCorners } from './utils/edgeDetection'
+import { detectNotesBoundaries } from './utils/aiNotesAutoCropModel'
 import { saveVaultQueue, loadVaultQueue, clearVault } from './utils/vaultDb'
 import { EnhancedCropModal } from './components/EnhancedCropModal'
 import { InteractivePreviewModal } from './components/InteractivePreviewModal'
@@ -31,6 +32,8 @@ import { CollageModal } from './components/CollageModal'
 import { AppSidebar } from './components/AppSidebar'
 import { ExportModal } from './components/ExportModal'
 import { MobileBottomNav } from './components/MobileBottomNav'
+import DocumentVaultModal from './components/DocumentVaultModal'
+import BookSplitterModal from './components/BookSplitterModal'
 import { triggerHaptic } from './utils/haptics'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
@@ -553,6 +556,15 @@ function App() {
   const [showCollageModal, setShowCollageModal] = useState(false)
   const [showSignatureModal, setShowSignatureModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showVaultModal, setShowVaultModal] = useState(false)
+  const [showBookSplitter, setShowBookSplitter] = useState(false)
+  const [bookSplitterImage, setBookSplitterImage] = useState(null)
+  const [autoSnapSteady, setAutoSnapSteady] = useState(false)
+  const [autoCropOnCapture, setAutoCropOnCapture] = useState(true)
+  const [stabilityScore, setStabilityScore] = useState(0)
+  const lastFrameDataRef = useRef(null)
+  const steadyCountRef = useRef(0)
+  const isCapturingRef = useRef(false)
   const [expandedCardOptionsId, setExpandedCardOptionsId] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : false)
 
@@ -1048,8 +1060,71 @@ function App() {
     }
   }, [cameraActive])
 
-  const captureFrame = () => {
+  // ── Auto-Snap Stability Detector (Hands-free scanner) ──────────────────────
+  useEffect(() => {
+    if (!cameraActive || !autoSnapSteady) {
+      setStabilityScore(0)
+      lastFrameDataRef.current = null
+      steadyCountRef.current = 0
+      return
+    }
+
+    const checkInterval = setInterval(() => {
+      if (isCapturingRef.current) return
+      const video = videoRef.current
+      if (!video || !video.videoWidth || video.readyState < 2) return
+
+      try {
+        const offCanvas = document.createElement('canvas')
+        offCanvas.width = 48
+        offCanvas.height = 36
+        const ctx = offCanvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(video, 0, 0, 48, 36)
+        const imgData = ctx.getImageData(0, 0, 48, 36).data
+
+        if (lastFrameDataRef.current) {
+          let diffSum = 0
+          const prev = lastFrameDataRef.current
+          for (let i = 0; i < imgData.length; i += 4) {
+            const l1 = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2]
+            const l2 = 0.299 * prev[i] + 0.587 * prev[i + 1] + 0.114 * prev[i + 2]
+            diffSum += Math.abs(l1 - l2)
+          }
+          const avgDiff = diffSum / (48 * 36)
+
+          // If frame difference is low (camera held steady over document)
+          if (avgDiff < 7.5) {
+            steadyCountRef.current = Math.min(4, steadyCountRef.current + 1)
+          } else {
+            steadyCountRef.current = Math.max(0, steadyCountRef.current - 1)
+          }
+
+          const score = Math.round((steadyCountRef.current / 4) * 100)
+          setStabilityScore(score)
+
+          // Once held steady for 4 intervals (~1.2s), trigger capture!
+          if (steadyCountRef.current >= 4 && !isCapturingRef.current) {
+            isCapturingRef.current = true
+            captureFrame()
+            setTimeout(() => {
+              steadyCountRef.current = 0
+              setStabilityScore(0)
+              isCapturingRef.current = false
+            }, 1800)
+          }
+        }
+        lastFrameDataRef.current = imgData
+      } catch (e) {
+        // ignore frame read errors
+      }
+    }, 300)
+
+    return () => clearInterval(checkInterval)
+  }, [cameraActive, autoSnapSteady, autoCropOnCapture])
+
+  const captureFrame = async () => {
     playShutterSound()
+    triggerHaptic('medium')
     const video = videoRef.current
     if (!video || !video.videoWidth) return
     const canvas = document.createElement('canvas')
@@ -1057,10 +1132,34 @@ function App() {
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    const dataUrl = canvas.toDataURL('image/png')
+    let dataUrl = canvas.toDataURL('image/png')
+
+    // AI Auto-Crop on capture if enabled
+    if (autoCropOnCapture) {
+      try {
+        const { corners, confidence } = await detectNotesBoundaries(dataUrl)
+        if (confidence > 0.45 && corners && corners.length === 4) {
+          const w = Math.round(Math.max(
+            Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y),
+            Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y)
+          ))
+          const h = Math.round(Math.max(
+            Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y),
+            Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y)
+          ))
+          if (w > 120 && h > 120) {
+            const cropped = await warpPerspective(dataUrl, corners, w, h)
+            if (cropped) dataUrl = cropped
+          }
+        }
+      } catch (err) {
+        console.warn('Auto crop on capture skipped:', err)
+      }
+    }
+
     const newItem = makeItem(dataUrl, `scan-${Date.now()}.png`, 'pdf-page', estimateDataUrlSize(dataUrl))
     setQueue((prev) => [...prev, newItem])
-    addToast('Frame captured! Tap thumbnail to inspect.')
+    addToast(autoCropOnCapture ? 'Page auto-snapped & AI cropped!' : 'Frame captured!')
     if (queue.length === 0) setPreviewItemId(newItem.id)
   }
 
@@ -1325,6 +1424,11 @@ function App() {
         onOpenQRScanner={() => setShowQRScanner(true)}
         onOpenInstallModal={() => setShowInstallModal(true)}
         onOpenSectionScan={handleTriggerSectionScan}
+        onOpenVault={() => setShowVaultModal(true)}
+        onOpenBookSplitter={() => {
+          setBookSplitterImage(queue.length > 0 ? queue[0].previewUrl : null)
+          setShowBookSplitter(true)
+        }}
         queueCount={queue.length}
       />
 
@@ -1550,9 +1654,51 @@ function App() {
               </div>
             </section>
 
-            {/* Live Camera Viewport */}
+            {/* Live Camera Viewport with Live Edge Alignment & Auto-Snap */}
             {cameraActive && (
-              <section className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200/80 dark:border-slate-800 p-4">
+              <section className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200/80 dark:border-slate-800 p-4 space-y-3">
+                {/* Auto-Snap & Crop Options Controls */}
+                <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        triggerHaptic('light')
+                        setAutoSnapSteady(!autoSnapSteady)
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        autoSnapSteady
+                          ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400/40'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <Zap size={13} className={autoSnapSteady ? 'fill-slate-950' : ''} />
+                      <span>Auto-Snap when Steady</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        triggerHaptic('light')
+                        setAutoCropOnCapture(!autoCropOnCapture)
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        autoCropOnCapture
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <Sparkles size={13} />
+                      <span>AI Auto-Crop</span>
+                    </button>
+                  </div>
+
+                  {autoSnapSteady && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                      <span>Steady: {stabilityScore}% (Hold still)</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="relative w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center shadow-inner aspect-[4/3]">
                   <video
                     ref={(el) => {
@@ -1568,10 +1714,35 @@ function App() {
                     onLoadedMetadata={(e) => setVideoAspect(`${e.target.videoWidth} / ${e.target.videoHeight}`)}
                     className="absolute inset-0 w-full h-full object-contain"
                   />
+
+                  {/* Corner Visual Target Guides */}
+                  <div className="absolute inset-6 sm:inset-10 pointer-events-none transition-all">
+                    {/* Top-Left */}
+                    <div className={`absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-lg transition-colors ${stabilityScore > 60 ? 'border-amber-400' : 'border-sky-400'}`} />
+                    {/* Top-Right */}
+                    <div className={`absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-lg transition-colors ${stabilityScore > 60 ? 'border-amber-400' : 'border-sky-400'}`} />
+                    {/* Bottom-Left */}
+                    <div className={`absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-lg transition-colors ${stabilityScore > 60 ? 'border-amber-400' : 'border-sky-400'}`} />
+                    {/* Bottom-Right */}
+                    <div className={`absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-lg transition-colors ${stabilityScore > 60 ? 'border-amber-400' : 'border-sky-400'}`} />
+                  </div>
+
                   <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 text-white text-[11px] px-2.5 py-1 rounded-full backdrop-blur-xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Scanner
                   </div>
-                  <div className="absolute inset-8 border-2 border-dashed border-white/60 rounded-xl pointer-events-none" />
+
+                  {autoSnapSteady && stabilityScore > 0 && (
+                    <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-xs text-white text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1.5 border border-amber-500/40">
+                      <div className="w-12 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-400 transition-all duration-300"
+                          style={{ width: `${stabilityScore}%` }}
+                        />
+                      </div>
+                      <span>{stabilityScore}%</span>
+                    </div>
+                  )}
+
                   <button
                     onClick={captureFrame}
                     className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-6 py-2.5 rounded-full shadow-xl flex items-center gap-2 active:scale-95 cursor-pointer"
@@ -1583,71 +1754,125 @@ function App() {
             )}
 
             {/* Quick Feature Launchers Row (Clean, Accessible Cards) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <button
-                onClick={() => setShowSignatureModal(true)}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
-              >
-                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800 group-hover:scale-105 transition-transform">
-                  <PenTool size={18} />
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Digital E-Sign</h4>
-                  <p className="text-[10px] text-slate-400">Draw, Type &amp; Stamp</p>
-                </div>
-              </button>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
+              {/* 1. Offline Vault */}
               <button
                 onClick={() => {
-                  setDocViewerFile(null);
-                  setShowDocViewer(true);
+                  triggerHaptic('medium')
+                  setShowVaultModal(true)
                 }}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-teal-300 dark:hover:border-teal-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
               >
-                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800 group-hover:scale-105 transition-transform">
-                  <BookOpen size={18} />
+                <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 border border-teal-200/60 dark:border-teal-800 group-hover:scale-105 transition-transform shrink-0">
+                  <Folder size={17} />
                 </div>
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Study Viewer</h4>
-                  <p className="text-[10px] text-slate-400">PDF • Notes • TTS</p>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Offline Vault</h4>
+                  <p className="text-[10px] text-slate-400 truncate">Folders &amp; Tags</p>
                 </div>
               </button>
 
+              {/* 2. Book Dual Splitter */}
               <button
-                onClick={() => setShowMergeSplitModal(true)}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setBookSplitterImage(queue.length > 0 ? queue[0].previewUrl : null)
+                  setShowBookSplitter(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
               >
-                <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800 group-hover:scale-105 transition-transform">
-                  <Scissors size={18} />
+                <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800 group-hover:scale-105 transition-transform shrink-0">
+                  <BookOpen size={17} />
                 </div>
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Merge &amp; Split</h4>
-                  <p className="text-[10px] text-slate-400">Vector Tools</p>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Book Mode</h4>
+                  <p className="text-[10px] text-slate-400 truncate">Spine Fix &amp; Split</p>
                 </div>
               </button>
 
+              {/* 3. Digital E-Sign */}
               <button
-                onClick={() => setShowIDCardModal(true)}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setShowSignatureModal(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
               >
-                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800 group-hover:scale-105 transition-transform">
-                  <CreditCard size={18} />
+                <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800 group-hover:scale-105 transition-transform shrink-0">
+                  <PenTool size={17} />
                 </div>
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">ID Card</h4>
-                  <p className="text-[10px] text-slate-400">Front + Back on 1 Page</p>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Digital E-Sign</h4>
+                  <p className="text-[10px] text-slate-400 truncate">Draw &amp; Stamp</p>
                 </div>
               </button>
 
+              {/* 4. Study Viewer */}
               <button
-                onClick={() => setShowCollageModal(true)}
-                className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-cyan-300 dark:hover:border-cyan-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-3 cursor-pointer group"
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setDocViewerFile(null)
+                  setShowDocViewer(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
               >
-                <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 border border-cyan-200/60 dark:border-cyan-800 group-hover:scale-105 transition-transform">
-                  <LayoutGrid size={18} />
+                <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800 group-hover:scale-105 transition-transform shrink-0">
+                  <FileText size={17} />
                 </div>
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Doc Collage</h4>
-                  <p className="text-[10px] text-slate-400">2, 4, 6 Handouts</p>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Study Viewer</h4>
+                  <p className="text-[10px] text-slate-400 truncate">PDF • Voice TTS</p>
+                </div>
+              </button>
+
+              {/* 5. Merge & Split */}
+              <button
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setShowMergeSplitModal(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
+              >
+                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800 group-hover:scale-105 transition-transform shrink-0">
+                  <Scissors size={17} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Merge &amp; Split</h4>
+                  <p className="text-[10px] text-slate-400 truncate">Vector Tools</p>
+                </div>
+              </button>
+
+              {/* 6. ID Card */}
+              <button
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setShowIDCardModal(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
+              >
+                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800 group-hover:scale-105 transition-transform shrink-0">
+                  <CreditCard size={17} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">ID Card</h4>
+                  <p className="text-[10px] text-slate-400 truncate">Front + Back</p>
+                </div>
+              </button>
+
+              {/* 7. Doc Collage */}
+              <button
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setShowCollageModal(true)
+                }}
+                className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 hover:border-cyan-300 dark:hover:border-cyan-700 shadow-xs hover:shadow-md transition-all text-left flex items-center gap-2.5 cursor-pointer group"
+              >
+                <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 border border-cyan-200/60 dark:border-cyan-800 group-hover:scale-105 transition-transform shrink-0">
+                  <LayoutGrid size={17} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">Doc Collage</h4>
+                  <p className="text-[10px] text-slate-400 truncate">2, 4, 6 Pages</p>
                 </div>
               </button>
             </div>
@@ -2166,6 +2391,11 @@ function App() {
         onOpenCollage={() => setShowCollageModal(true)}
         onOpenQRScanner={() => setShowQRScanner(true)}
         onOpenInstallModal={() => setShowInstallModal(true)}
+        onOpenVault={() => setShowVaultModal(true)}
+        onOpenBookSplitter={() => {
+          setBookSplitterImage(queue.length > 0 ? queue[0].previewUrl : null)
+          setShowBookSplitter(true)
+        }}
         queueCount={queue.length}
       />
 
@@ -2327,6 +2557,36 @@ function App() {
         exportProgress={exportProgress}
         pdfPageSizes={PDF_PAGE_SIZES}
         formatBytes={formatBytes}
+      />
+
+      {/* 15. Offline Categorized Document Vault Modal */}
+      <DocumentVaultModal
+        isOpen={showVaultModal}
+        onClose={() => setShowVaultModal(false)}
+        currentQueue={queue}
+        onLoadPagesToQueue={(pages) => {
+          setQueue(pages)
+          addToast(`Restored ${pages.length} page(s) from vault into workspace!`)
+        }}
+        onDirectExportPdf={(pages, title) => {
+          setQueue(pages)
+          setPdfFilename(title)
+          setShowExportModal(true)
+        }}
+      />
+
+      {/* 16. Book Dual-Page Splitter & Curvature Flattening Modal */}
+      <BookSplitterModal
+        isOpen={showBookSplitter}
+        onClose={() => setShowBookSplitter(false)}
+        initialImageUrl={bookSplitterImage}
+        onAddSplitPages={(newPages) => {
+          const newItems = newPages.map((p) =>
+            makeItem(p.dataUrl, p.name, 'pdf-page', estimateDataUrlSize(p.dataUrl))
+          )
+          setQueue((prev) => [...prev, ...newItems])
+          addToast(`Split book into ${newItems.length} upright pages!`)
+        }}
       />
 
             {/* ─── Toast Notifications ──────────────────────────────────────────── */}

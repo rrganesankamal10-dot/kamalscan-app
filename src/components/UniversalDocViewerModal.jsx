@@ -10,6 +10,8 @@ import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
 import { parseDocx, parsePptx, parsePlainText } from '../utils/documentParser'
 import { extractPdfSearchableText } from '../utils/pdfTools'
+import { generateNarrationWav, downloadAudioFile } from '../utils/audioExport'
+import { triggerHaptic } from '../utils/haptics'
 
 // ─── AI Multi-Language Dubbing Languages & Client-Side Translator ───────────
 const DUBBING_LANGUAGES = [
@@ -543,6 +545,20 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     if (isSpeaking) {
       stopTTS()
       setTimeout(startTTS, 150)
+    }
+  }
+
+  const handleExportVoiceAudio = () => {
+    try {
+      triggerHaptic('medium')
+      const textToExport = dubbedTranscript || plainText || (file?.name ? `Document: ${file.name}` : 'KamalScan Document')
+      const audioBlob = generateNarrationWav(textToExport, 5)
+      const cleanName = (file?.name || 'KamalScan-Doc').replace(/\.[^/.]+$/, '')
+      downloadAudioFile(audioBlob, `${cleanName}-${dubbingLang}-AudioNote.wav`)
+      triggerHaptic('success')
+      setSpeechStatus('Audio note exported (.wav)')
+    } catch (err) {
+      alert('Could not export audio: ' + err.message)
     }
   }
 
@@ -1229,6 +1245,19 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Audio File Export / Download Row */}
+            <div className="pt-2 border-t border-slate-700/80 flex items-center justify-between gap-2 text-xs">
+              <span className="text-[10px] text-slate-400">Audio Podcast / Voice Note:</span>
+              <button
+                onClick={handleExportVoiceAudio}
+                className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                title="Download speech audio (.wav) to play or share"
+              >
+                <Download size={12} />
+                <span>Export Audio (.wav)</span>
+              </button>
             </div>
 
           </div>

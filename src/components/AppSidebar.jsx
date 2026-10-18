@@ -3,7 +3,7 @@ import {
   FileText, UploadCloud, Camera, BookOpen, Scissors, CreditCard, LayoutGrid,
   PenTool, QrCode, Sparkles, Wand2, Stamp, RotateCw, Crop, ShieldCheck,
   Moon, Sun, Smartphone, Monitor, Download, ChevronLeft, ChevronRight, X,
-  Layers, CheckCircle2, Info
+  Layers, CheckCircle2, Info, Folder
 } from 'lucide-react'
 
 export function AppSidebar({
@@ -22,6 +22,8 @@ export function AppSidebar({
   onOpenQRScanner,
   onOpenInstallModal,
   onOpenSectionScan,
+  onOpenVault,
+  onOpenBookSplitter,
   queueCount = 0,
 }) {
   const navItems = [
@@ -58,6 +60,30 @@ export function AppSidebar({
       badgeColor: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-700',
       onClick: () => {
         onOpenDocViewer()
+        if (window.innerWidth < 1024) onCloseMobile()
+      },
+    },
+    {
+      id: 'vault',
+      label: 'Offline Document Vault',
+      sub: 'Organized Folders & Tags',
+      icon: <Folder size={18} className="text-emerald-500" />,
+      badge: '100% Offline',
+      badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700',
+      onClick: () => {
+        if (onOpenVault) onOpenVault()
+        if (window.innerWidth < 1024) onCloseMobile()
+      },
+    },
+    {
+      id: 'book_split',
+      label: 'Book Dual-Page Splitter',
+      sub: 'Flatten Spine & Split 2-Page',
+      icon: <BookOpen size={18} className="text-amber-500" />,
+      badge: 'Spine Fix',
+      badgeColor: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-700',
+      onClick: () => {
+        if (onOpenBookSplitter) onOpenBookSplitter()
         if (window.innerWidth < 1024) onCloseMobile()
       },
     },

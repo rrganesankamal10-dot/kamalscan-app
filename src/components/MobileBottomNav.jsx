@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   UploadCloud, BookOpen, PenTool, Wrench, Smartphone,
-  Scissors, CreditCard, LayoutGrid, QrCode, X, ChevronUp
+  Scissors, CreditCard, LayoutGrid, QrCode, X, ChevronUp, Folder
 } from 'lucide-react'
 import { triggerHaptic } from '../utils/haptics'
 
@@ -15,6 +15,8 @@ export function MobileBottomNav({
   onOpenCollage,
   onOpenQRScanner,
   onOpenInstallModal,
+  onOpenVault,
+  onOpenBookSplitter,
   queueCount = 0,
 }) {
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -116,6 +118,40 @@ export function MobileBottomNav({
                 <div>
                   <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">QR &amp; Barcode</h4>
                   <p className="text-[10px] text-slate-400">Direct notes extract</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setToolsOpen(false)
+                  if (onOpenVault) onOpenVault()
+                }}
+                className="p-3.5 rounded-2xl bg-teal-50/60 dark:bg-teal-950/40 border border-teal-200/80 dark:border-teal-800/80 text-left flex items-center gap-3 active:scale-98 transition-all"
+              >
+                <div className="p-2.5 rounded-xl bg-teal-600 text-white shrink-0">
+                  <Folder size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Document Vault</h4>
+                  <p className="text-[10px] text-slate-400">Folders &amp; offline tags</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  triggerHaptic('medium')
+                  setToolsOpen(false)
+                  if (onOpenBookSplitter) onOpenBookSplitter()
+                }}
+                className="p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/80 text-left flex items-center gap-3 active:scale-98 transition-all"
+              >
+                <div className="p-2.5 rounded-xl bg-amber-600 text-white shrink-0">
+                  <BookOpen size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">Book Splitter</h4>
+                  <p className="text-[10px] text-slate-400">Flatten spine &amp; split 2-page</p>
                 </div>
               </button>
             </div>
