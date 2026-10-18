@@ -29,6 +29,9 @@ import { InstallAppModal } from './components/InstallAppModal'
 import { PDFMergeSplitModal } from './components/PDFMergeSplitModal'
 import { CollageModal } from './components/CollageModal'
 import { AppSidebar } from './components/AppSidebar'
+import { ExportModal } from './components/ExportModal'
+import { MobileBottomNav } from './components/MobileBottomNav'
+import { triggerHaptic } from './utils/haptics'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -549,6 +552,8 @@ function App() {
   const [showMergeSplitModal, setShowMergeSplitModal] = useState(false)
   const [showCollageModal, setShowCollageModal] = useState(false)
   const [showSignatureModal, setShowSignatureModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [expandedCardOptionsId, setExpandedCardOptionsId] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const handleApplyCollage = (collageDataUrl) => {
@@ -1137,8 +1142,11 @@ function App() {
   }
 
   // ── Combine all → PDF with real progress ──────────────────────────────────
-  const processAll = async () => {
+  const processAll = async (options = {}) => {
     if (queue.length === 0) return
+    const { qualityPreset = 'balanced', includeSearchableText = true } = options
+    const overrideTier = qualityPreset === 'compact' ? 'max' : qualityPreset === 'lossless' ? 'lossless' : 'balanced'
+
     const pageSize = PDF_PAGE_SIZES[pdfPageSize]
     const pdf = new jsPDF({ unit: 'mm', format: [pageSize.width, pageSize.height] })
     let totalOriginal = 0
@@ -1149,7 +1157,8 @@ function App() {
       const item = queue[i]
       setExportProgress({ current: i + 1, total: totalPages, name: item.name })
 
-      const blob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode, item.paddingPx)
+      const activeTier = item.tier === 'custom' ? 'custom' : overrideTier
+      const blob = await compressFromSrc(item.previewUrl, activeTier, item.customQuality, item.enhanceMode, item.paddingPx)
       totalOriginal += item.originalSize
       totalCompressed += blob.size
       const savedPercent = Math.max(0, Math.round((1 - blob.size / item.originalSize) * 100))
@@ -1162,8 +1171,8 @@ function App() {
       const pdfH = (imgProps.height * pdfW) / imgProps.width
       pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()))
 
-      // Searchable PDF (PDF/A invisible OCR text layer)
-      if (item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
+      // Searchable PDF (PDF/A invisible selectable OCR text layer)
+      if (includeSearchableText && item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
         try {
           pdf.internal.write('/Tr 3 Tr') // PDF rendering mode 3 = invisible selectable text
           pdf.setFontSize(8)
@@ -1188,6 +1197,7 @@ function App() {
     }
 
     setExportProgress(null)
+    setShowExportModal(false)
     pdf.save(`${pdfFilename || 'kamalscan-document'}.pdf`)
     const overallSaved = Math.max(0, Math.round((1 - totalCompressed / totalOriginal) * 100))
     setSummary({ totalOriginal, totalCompressed, savedPercent: overallSaved })
@@ -1195,8 +1205,11 @@ function App() {
   }
 
   // ── Native Share PDF (WhatsApp, Gmail, Drive, Bluetooth) ────────────────────
-  const sharePdf = async () => {
+  const sharePdf = async (options = {}) => {
     if (queue.length === 0) return
+    const { qualityPreset = 'balanced', includeSearchableText = true } = options
+    const overrideTier = qualityPreset === 'compact' ? 'max' : qualityPreset === 'lossless' ? 'lossless' : 'balanced'
+
     const pageSize = PDF_PAGE_SIZES[pdfPageSize]
     const pdf = new jsPDF({ unit: 'mm', format: [pageSize.width, pageSize.height] })
     const totalPages = queue.length
@@ -1205,7 +1218,8 @@ function App() {
     for (let i = 0; i < totalPages; i++) {
       const item = queue[i]
       setExportProgress({ current: i + 1, total: totalPages, name: item.name })
-      const blob = await compressFromSrc(item.previewUrl, item.tier, item.customQuality, item.enhanceMode, item.paddingPx)
+      const activeTier = item.tier === 'custom' ? 'custom' : overrideTier
+      const blob = await compressFromSrc(item.previewUrl, activeTier, item.customQuality, item.enhanceMode, item.paddingPx)
       const dataUrl = await blobToDataUrl(blob)
       if (i > 0) pdf.addPage([pageSize.width, pageSize.height])
       const imgProps = pdf.getImageProperties(dataUrl)
@@ -1214,7 +1228,7 @@ function App() {
       pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()))
 
       // Searchable PDF (PDF/A invisible OCR text layer)
-      if (item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
+      if (includeSearchableText && item.ocrText && item.ocrText.trim() && !item.ocrText.startsWith('(')) {
         try {
           pdf.internal.write('/Tr 3 Tr') // PDF rendering mode 3 = invisible selectable text
           pdf.setFontSize(8)
@@ -1234,6 +1248,7 @@ function App() {
     }
 
     setExportProgress(null)
+    setShowExportModal(false)
     const pdfBlob = pdf.output('blob')
     const fileName = `${pdfFilename || 'kamalscan-document'}.pdf`
     const file = new File([pdfBlob], fileName, { type: 'application/pdf' })
@@ -1243,7 +1258,7 @@ function App() {
         await navigator.share({
           files: [file],
           title: fileName,
-          text: 'Scanned with KamalScan AI Document Scanner',
+          text: 'Scanned with KamalScan Document Studio',
         })
       } catch (e) {
         console.log('Share canceled', e)
@@ -1414,62 +1429,89 @@ function App() {
                 Scan notes with AI Auto-Crop, open live camera, or browse <b>PDFs</b>, <b>Images</b>, <b>Word</b> &amp; <b>PowerPoint</b> files.
               </p>
               
-              {/* 3 Dedicated Actions: Open Camera, Browse Files, Section Scan */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 max-w-xl mx-auto">
+              {/* 4 Dedicated Actions: Camera Scan, Import Files, Smart Crop, ID Card */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto">
                 {/* 1. Open Camera */}
                 {!cameraActive ? (
                   <button
-                    onClick={startCamera}
-                    className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-sky-500 dark:hover:border-sky-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
+                    onClick={() => {
+                      triggerHaptic('medium')
+                      startCamera()
+                    }}
+                    className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-sky-500 dark:hover:border-sky-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
                   >
                     <div className="p-3 rounded-2xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 mb-2 group-hover:scale-110 transition-transform shadow-xs">
-                      <Camera size={24} />
+                      <Camera size={22} />
                     </div>
-                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Open Camera</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Live note viewfinder</span>
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Camera Scan</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">Live viewfinder</span>
                   </button>
                 ) : (
                   <button
-                    onClick={stopCamera}
-                    className="flex flex-col items-center justify-center p-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white shadow-md active:scale-98 transition-all cursor-pointer"
+                    onClick={() => {
+                      triggerHaptic('light')
+                      stopCamera()
+                    }}
+                    className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white shadow-md active:scale-98 transition-all cursor-pointer"
                   >
                     <div className="p-3 rounded-2xl bg-white/20 mb-2">
-                      <X size={24} />
+                      <X size={22} />
                     </div>
                     <span className="font-bold text-xs">Stop Camera</span>
-                    <span className="text-[10px] text-white/80 mt-0.5">Close viewfinder</span>
+                    <span className="text-[10px] text-white/80 mt-0.5">Close live view</span>
                   </button>
                 )}
 
                 {/* 2. Browse Files */}
-                <label className="flex flex-col items-center justify-center p-4 rounded-2xl bg-gradient-to-tr from-sky-600 via-sky-500 to-indigo-600 text-white shadow-md hover:shadow-lg hover:scale-[1.02] transition-all active:scale-98 cursor-pointer group">
+                <label className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-gradient-to-tr from-sky-600 via-sky-500 to-indigo-600 text-white shadow-md hover:shadow-lg hover:scale-[1.02] transition-all active:scale-98 cursor-pointer group">
                   <div className="p-3 rounded-2xl bg-white/20 mb-2 group-hover:scale-110 transition-transform shadow-xs">
-                    <UploadCloud size={24} />
+                    <UploadCloud size={22} />
                   </div>
-                  <span className="font-bold text-xs">Browse Files</span>
-                  <span className="text-[10px] text-white/80 mt-0.5">PDF, Word, PPTX, Images</span>
+                  <span className="font-bold text-xs">Import Files</span>
+                  <span className="text-[10px] text-white/80 mt-0.5">PDF, Word, Slides</span>
                   <input
                     type="file"
                     accept="image/*,application/pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.csv"
                     multiple
                     className="hidden"
-                    onChange={(e) => addFilesToQueue(e.target.files)}
+                    onChange={(e) => {
+                      triggerHaptic('medium')
+                      addFilesToQueue(e.target.files)
+                    }}
                   />
                 </label>
 
                 {/* 3. Section Scan */}
                 <button
-                  onClick={handleTriggerSectionScan}
-                  className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 dark:hover:border-emerald-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
+                  onClick={() => {
+                    triggerHaptic('medium')
+                    handleTriggerSectionScan()
+                  }}
+                  className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 dark:hover:border-emerald-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
                 >
                   <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 mb-2 group-hover:scale-110 transition-transform shadow-xs">
-                    <Scissors size={24} />
+                    <Scissors size={22} />
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Section Scan</span>
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100">Smart Crop</span>
                     <Sparkles size={11} className="text-emerald-500" />
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-0.5">AI Notes Auto-Crop</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">AI Notes Edge Snap</span>
+                </button>
+
+                {/* 4. ID Card Dual-Side */}
+                <button
+                  onClick={() => {
+                    triggerHaptic('medium')
+                    setShowIDCardModal(true)
+                  }}
+                  className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-white dark:bg-slate-800/80 border-2 border-slate-200 dark:border-slate-700/80 hover:border-purple-500 dark:hover:border-purple-500 shadow-xs hover:shadow-md transition-all active:scale-98 group cursor-pointer"
+                >
+                  <div className="p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                    <CreditCard size={22} />
+                  </div>
+                  <span className="font-bold text-xs text-slate-800 dark:text-slate-100">ID Card Scan</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">Front + Back on 1 Page</span>
                 </button>
               </div>
 
@@ -1775,169 +1817,236 @@ function App() {
                     </div>
 
                     {/* Action buttons: Rotate · Auto-Crop · Watermark · E-Sign */}
-                    <div className="grid grid-cols-4 gap-1">
+                    {/* 1-Tap Document Filter Presets */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                          <Wand2 size={10} className="text-sky-500" /> Filter
+                        </span>
+                        <span className="text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+                          {ENHANCE_MODES[item.enhanceMode]?.label || 'Original'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { id: 'magic', label: 'Auto' },
+                          { id: 'doc_bw', label: 'B&W' },
+                          { id: 'sharp', label: 'Contrast' },
+                          { id: 'none', label: 'Original' }
+                        ].map((filter) => (
+                          <button
+                            key={filter.id}
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic('selection')
+                              updateItem(item.id, { enhanceMode: filter.id })
+                            }}
+                            className={`py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                              item.enhanceMode === filter.id
+                                ? 'bg-sky-600 text-white shadow-xs'
+                                : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            {filter.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Primary Action Buttons: Rotate · Crop · E-Sign · Text OCR · More */}
+                    <div className="grid grid-cols-5 gap-1 pt-0.5">
                       <button
-                        onClick={() => rotateItem(item.id)}
+                        onClick={() => {
+                          triggerHaptic('light')
+                          rotateItem(item.id)
+                        }}
                         draggable={false}
-                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[10px] font-medium border border-slate-100 dark:border-slate-600/50"
+                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[10px] font-semibold border border-slate-100 dark:border-slate-600/50 cursor-pointer"
                         title="Rotate 90 degrees"
                       >
                         <RotateCw size={13} />
                         Rotate
                       </button>
                       <button
-                        onClick={() => setCropItemId(item.id)}
+                        onClick={() => {
+                          triggerHaptic('medium')
+                          setCropItemId(item.id)
+                        }}
                         draggable={false}
-                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-600 dark:text-sky-400 transition-colors text-[10px] font-medium border border-sky-100 dark:border-sky-900/60"
+                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-600 dark:text-sky-400 transition-colors text-[10px] font-semibold border border-sky-100 dark:border-sky-900/60 cursor-pointer"
                         title="Straighten and crop document"
                       >
                         <Crop size={13} />
-                        Auto-Crop
+                        Crop
                       </button>
                       <button
-                        onClick={() => setWatermarkTarget({ mode: 'single', itemId: item.id })}
+                        onClick={() => {
+                          triggerHaptic('medium')
+                          setSignatureTargetId(item.id)
+                          setShowSignatureModal(true)
+                        }}
                         draggable={false}
-                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-400 transition-colors text-[10px] font-medium border border-indigo-100 dark:border-indigo-900/60"
-                        title="Stamp watermark"
-                      >
-                        <Stamp size={13} />
-                        Watermark
-                      </button>
-                      <button
-                        onClick={() => setSignatureTargetId(item.id)}
-                        draggable={false}
-                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900 text-amber-700 dark:text-amber-400 transition-colors text-[10px] font-medium border border-amber-100 dark:border-amber-900/60"
-                        title="Draw and stamp handwritten signature"
+                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-600 dark:text-rose-400 transition-colors text-[10px] font-semibold border border-rose-100 dark:border-rose-900/60 cursor-pointer"
+                        title="Draw signature or apply official stamp"
                       >
                         <PenTool size={13} />
                         E-Sign
                       </button>
+                      <button
+                        onClick={() => {
+                          triggerHaptic('light')
+                          runOcr(item.id)
+                        }}
+                        disabled={item.ocrLoading}
+                        draggable={false}
+                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-emerald-600 dark:text-emerald-400 disabled:opacity-50 transition-colors text-[10px] font-semibold border border-emerald-100 dark:border-emerald-900/60 cursor-pointer"
+                        title="Extract readable text"
+                      >
+                        {item.ocrLoading ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />}
+                        Text
+                      </button>
+                      <button
+                        onClick={() => {
+                          triggerHaptic('light')
+                          setExpandedCardOptionsId(expandedCardOptionsId === item.id ? null : item.id)
+                        }}
+                        draggable={false}
+                        className={`flex flex-col items-center gap-0.5 py-1.5 rounded-xl transition-colors text-[10px] font-semibold border cursor-pointer ${
+                          expandedCardOptionsId === item.id
+                            ? 'bg-slate-800 text-white border-slate-700'
+                            : 'bg-slate-50 dark:bg-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-100 dark:border-slate-600/50'
+                        }`}
+                        title="Advanced padding, watermark & format settings"
+                      >
+                        <Sliders size={13} />
+                        More
+                      </button>
                     </div>
 
-                    {/* Remove watermark if active */}
+                    {/* Watermark badge if active */}
                     {item.watermarkBackup && (
                       <button
-                        onClick={() => removeWatermark(item.id)}
+                        onClick={() => {
+                          triggerHaptic('light')
+                          removeWatermark(item.id)
+                        }}
                         draggable={false}
-                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium border border-red-100 dark:border-red-900/50 transition-colors"
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-medium border border-red-100 dark:border-red-900/50 transition-colors cursor-pointer"
                       >
                         <Eraser size={12} /> Remove Watermark
                       </button>
                     )}
 
-                    {/* Color filter dropdown */}
-                    <div>
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-1">
-                        <Wand2 size={10} /> Color Filter
-                      </label>
-                      <select
-                        value={item.enhanceMode}
-                        onChange={(e) => updateItem(item.id, { enhanceMode: e.target.value })}
-                        className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                      >
-                        {Object.entries(ENHANCE_MODES).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                      </select>
-                    </div>
+                    {/* Collapsible Advanced Options Drawer */}
+                    {expandedCardOptionsId === item.id && (
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 space-y-2.5 animate-slide-in">
+                        {/* Watermark trigger */}
+                        <button
+                          onClick={() => {
+                            triggerHaptic('light')
+                            setWatermarkTarget({ mode: 'single', itemId: item.id })
+                          }}
+                          className="w-full py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold flex items-center justify-center gap-1.5 border border-indigo-200/60 dark:border-indigo-800/60 transition-colors cursor-pointer"
+                        >
+                          <Stamp size={13} /> Stamp Watermark
+                        </button>
 
-                    {/* White padding */}
-                    <div>
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center justify-between mb-1">
-                        <span className="flex items-center gap-1"><Maximize2 size={10} /> White Padding</span>
-                        <span className="font-bold text-slate-600 dark:text-slate-300">{item.paddingPx}px</span>
-                      </label>
-                      <input
-                        type="range" min="0" max="80" step="4" value={item.paddingPx}
-                        onChange={(e) => updateItem(item.id, { paddingPx: parseInt(e.target.value) })}
-                        className="w-full accent-sky-600"
-                      />
-                    </div>
-
-                    {/* Compression tier */}
-                    <div>
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-1">
-                        <Sliders size={10} /> Compression
-                      </label>
-                      <select
-                        value={item.tier}
-                        onChange={(e) => updateItem(item.id, { tier: e.target.value })}
-                        className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                      >
-                        {Object.entries(TIER_CONFIG).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                      </select>
-                    </div>
-
-                    {/* Custom target size */}
-                    {item.tier === 'custom' && (
-                      <div className="bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-950/50 dark:to-cyan-950/50 rounded-xl p-3 border border-sky-100 dark:border-sky-900/60 space-y-1.5">
-                        <label className="text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400 flex items-center gap-1">
-                          <Target size={10} /> Target File Size
-                        </label>
-                        <div className="flex gap-1.5">
+                        {/* White padding */}
+                        <div>
+                          <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center justify-between mb-1">
+                            <span className="flex items-center gap-1"><Maximize2 size={10} /> White Margin Padding</span>
+                            <span className="font-bold text-slate-600 dark:text-slate-300">{item.paddingPx}px</span>
+                          </label>
                           <input
-                            type="number" min="10" value={item.targetSize}
-                            onChange={(e) => updateItem(item.id, { targetSize: parseFloat(e.target.value) || 0 })}
-                            className="flex-1 min-w-0 text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                            type="range" min="0" max="80" step="4" value={item.paddingPx}
+                            onChange={(e) => updateItem(item.id, { paddingPx: parseInt(e.target.value) })}
+                            className="w-full accent-sky-600"
                           />
+                        </div>
+
+                        {/* Compression tier */}
+                        <div>
+                          <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-1">
+                            <Sliders size={10} /> Compression Tier
+                          </label>
                           <select
-                            value={item.targetUnit}
-                            onChange={(e) => updateItem(item.id, { targetUnit: e.target.value })}
-                            className="text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-1.5 py-1.5 focus:outline-none"
+                            value={item.tier}
+                            onChange={(e) => updateItem(item.id, { tier: e.target.value })}
+                            className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
                           >
-                            <option value="KB">KB</option>
-                            <option value="MB">MB</option>
+                            {Object.entries(TIER_CONFIG).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
+                          </select>
+                        </div>
+
+                        {item.tier === 'custom' && (
+                          <div className="bg-sky-50 dark:bg-sky-950/50 rounded-xl p-2.5 border border-sky-100 dark:border-sky-900/60 space-y-1.5">
+                            <label className="text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                              <Target size={10} /> Target File Size
+                            </label>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="number" min="10" value={item.targetSize}
+                                onChange={(e) => updateItem(item.id, { targetSize: parseFloat(e.target.value) || 0 })}
+                                className="flex-1 min-w-0 text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1"
+                              />
+                              <select
+                                value={item.targetUnit}
+                                onChange={(e) => updateItem(item.id, { targetUnit: e.target.value })}
+                                className="text-xs border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg px-1.5 py-1"
+                              >
+                                <option value="KB">KB</option>
+                                <option value="MB">MB</option>
+                              </select>
+                              <button
+                                onClick={() => fitToTargetSize(item)}
+                                disabled={item.fittingSize}
+                                draggable={false}
+                                className="text-xs bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-2.5 rounded-lg flex items-center justify-center font-semibold"
+                              >
+                                {item.fittingSize ? <Loader2 size={11} className="animate-spin" /> : 'Fit'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Download single row */}
+                        <div className="flex gap-1.5 pt-1">
+                          <select
+                            value={item.downloadFormat}
+                            onChange={(e) => updateItem(item.id, { downloadFormat: e.target.value })}
+                            className="flex-1 text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none"
+                          >
+                            {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
                           </select>
                           <button
-                            onClick={() => fitToTargetSize(item)}
-                            disabled={item.fittingSize}
+                            onClick={() => {
+                              triggerHaptic('light')
+                              downloadSingle(item)
+                            }}
                             draggable={false}
-                            className="text-xs bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-3 rounded-lg flex items-center justify-center font-semibold transition-colors"
+                            className="bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-xs px-3 rounded-lg flex items-center gap-1 font-semibold transition-colors cursor-pointer"
                           >
-                            {item.fittingSize ? <Loader2 size={12} className="animate-spin" /> : 'Fit'}
+                            <Download size={12} /> Save
                           </button>
                         </div>
                       </div>
                     )}
 
-                    {/* Download single row */}
-                    <div className="flex gap-1.5 pt-1">
-                      <select
-                        value={item.downloadFormat}
-                        onChange={(e) => updateItem(item.id, { downloadFormat: e.target.value })}
-                        className="flex-1 text-xs border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                      >
-                        {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
-                      </select>
-                      <button
-                        onClick={() => downloadSingle(item)}
-                        draggable={false}
-                        className="bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white text-xs px-4 rounded-lg flex items-center gap-1.5 font-semibold shadow-xs transition-all hover:scale-[1.02]"
-                      >
-                        <Download size={13} /> Save
-                      </button>
-                    </div>
-
-                    {/* OCR action */}
-                    <button
-                      onClick={() => runOcr(item.id)}
-                      disabled={item.ocrLoading}
-                      draggable={false}
-                      className="w-full text-xs bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 disabled:opacity-50 rounded-xl py-2 font-semibold flex items-center justify-center gap-1.5 border border-emerald-100 dark:border-emerald-900/50 transition-colors"
-                    >
-                      {item.ocrLoading ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />}
-                      {item.ocrLoading ? 'Reading text...' : `Extract Text (${OCR_LANGS[ocrLang]})`}
-                    </button>
-
+                    {/* OCR Text Area if extracted */}
                     {item.ocrText && (
-                      <div className="space-y-1">
+                      <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-slate-700/60 animate-slide-in">
                         <textarea
                           readOnly
                           value={item.ocrText}
                           className="w-full text-xs border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 rounded-lg p-2 h-20 font-mono resize-none focus:outline-none"
                         />
                         <button
-                          onClick={() => copyToClipboard(item.ocrText)}
+                          onClick={() => {
+                            triggerHaptic('light')
+                            copyToClipboard(item.ocrText)
+                          }}
                           draggable={false}
-                          className="w-full text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg py-1.5 flex items-center justify-center gap-1.5 transition-colors font-medium"
+                          className="w-full text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-lg py-1.5 flex items-center justify-center gap-1.5 transition-colors font-medium cursor-pointer"
                         >
                           <Copy size={12} /> Copy Extracted Text
                         </button>
@@ -1985,66 +2094,69 @@ function App() {
 
       {/* ─── Floating Footer Toolbar ──────────────────────────────────────── */}
       {queue.length > 0 && (
-        <footer className="fixed bottom-0 left-0 right-0 lg:left-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-2xl z-40">
+        <footer className="fixed bottom-14 lg:bottom-0 left-0 right-0 lg:left-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-2xl z-20">
           <div className="max-w-7xl mx-auto px-4 py-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mb-2">
-              <span className="flex items-center gap-1"><Layers size={12} /> <b className="text-slate-800 dark:text-slate-100">{queue.length}</b> pages</span>
-              <span className="flex items-center gap-1"><BarChart3 size={12} /> Total: <b className="text-slate-800 dark:text-slate-100">{formatBytes(totalSize)}</b></span>
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Zap size={12} /> Est. output: <b>{formatBytes(estimatedOutputBytes)}</b></span>
-              <span className="flex items-center gap-1 text-sky-600 dark:text-sky-400"><AlignCenter size={12} /> {PDF_PAGE_SIZES[pdfPageSize].label}</span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1.5 cursor-pointer bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
-                  <input type="checkbox" checked={addPageNumbers} onChange={(e) => setAddPageNumbers(e.target.checked)} className="rounded text-sky-600 focus:ring-sky-400" />
-                  <Hash size={12} /> Page Nos.
-                </label>
-                <input
-                  type="text" value={pdfFilename} onChange={(e) => setPdfFilename(e.target.value)}
-                  placeholder="filename"
-                  className="text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2.5 py-1.5 w-32 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                />
-                <select
-                  value={pdfPageSize}
-                  onChange={(e) => setPdfPageSize(e.target.value)}
-                  className="text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                >
-                  {Object.entries(PDF_PAGE_SIZES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-1.5 font-bold text-slate-900 dark:text-slate-100 bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-lg border border-sky-200/60 dark:border-sky-800">
+                  <Layers size={13} /> {queue.length} Page{queue.length > 1 ? 's' : ''}
+                </span>
+                <span className="hidden sm:inline">
+                  Est: <b className="text-emerald-600 dark:text-emerald-400 font-semibold">{formatBytes(estimatedOutputBytes)}</b>
+                </span>
+                <span className="hidden md:inline">
+                  • {PDF_PAGE_SIZES[pdfPageSize].label}
+                </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={downloadAllAsZip}
-                  disabled={zipBuilding}
-                  className="px-4 py-2 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-2 transition-all hover:scale-[1.02] shadow-sm"
-                >
-                  {zipBuilding ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-                  {zipBuilding ? 'Building ZIP...' : 'Download ZIP'}
-                </button>
-                <button
-                  onClick={sharePdf}
+                  onClick={() => {
+                    triggerHaptic('medium')
+                    sharePdf()
+                  }}
                   disabled={!!exportProgress}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
                   title="Share PDF to WhatsApp, Gmail, Drive"
                 >
-                  <Share2 size={14} className="text-emerald-500" />
+                  <Share2 size={15} className="text-emerald-500" />
                   <span className="hidden sm:inline">Share</span>
                 </button>
                 <button
-                  onClick={processAll}
+                  onClick={() => {
+                    triggerHaptic('medium')
+                    setShowExportModal(true)
+                  }}
                   disabled={!!exportProgress}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-2 transition-all hover:scale-[1.02] shadow-sm cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-98 shadow-md shadow-sky-600/20 cursor-pointer"
                 >
-                  {exportProgress ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
-                  {exportProgress ? `Exporting ${exportProgress.current}/${exportProgress.total}...` : 'Export PDF'}
+                  {exportProgress ? <Loader2 size={15} className="animate-spin" /> : <FileDown size={15} />}
+                  <span>{exportProgress ? `Exporting ${exportProgress.current}/${exportProgress.total}...` : 'Export PDF'}</span>
                 </button>
               </div>
             </div>
           </div>
         </footer>
       )}
+
+      {/* ─── Mobile Bottom Navigation Bar (Ergonomic for phones) ─────────── */}
+      <MobileBottomNav
+        activeTab="scan"
+        onOpenScan={() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }}
+        onOpenDocViewer={() => {
+          setDocViewerFile(null)
+          setShowDocViewer(true)
+        }}
+        onOpenSignature={() => setShowSignatureModal(true)}
+        onOpenMergeSplit={() => setShowMergeSplitModal(true)}
+        onOpenIDCard={() => setShowIDCardModal(true)}
+        onOpenCollage={() => setShowCollageModal(true)}
+        onOpenQRScanner={() => setShowQRScanner(true)}
+        onOpenInstallModal={() => setShowInstallModal(true)}
+        queueCount={queue.length}
+      />
 
             </div>
 
@@ -2184,6 +2296,26 @@ function App() {
         onClose={() => setShowCollageModal(false)}
         queueItems={queue}
         onApplyCollage={handleApplyCollage}
+      />
+
+      {/* 14. Polished PDF Export & Quality Presets Sheet Modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        queue={queue}
+        pdfFilename={pdfFilename}
+        setPdfFilename={setPdfFilename}
+        pdfPageSize={pdfPageSize}
+        setPdfPageSize={setPdfPageSize}
+        addPageNumbers={addPageNumbers}
+        setAddPageNumbers={setAddPageNumbers}
+        onExportPdf={processAll}
+        onSharePdf={sharePdf}
+        onExportZip={downloadAllAsZip}
+        isExporting={Boolean(exportProgress)}
+        exportProgress={exportProgress}
+        pdfPageSizes={PDF_PAGE_SIZES}
+        formatBytes={formatBytes}
       />
 
             {/* ─── Toast Notifications ──────────────────────────────────────────── */}

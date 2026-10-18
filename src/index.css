@@ -2,12 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.011em;
+  }
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+
 @layer utilities {
   @keyframes slide-in {
-    from { opacity: 0; transform: translateX(1rem) scale(0.97); }
-    to   { opacity: 1; transform: translateX(0)     scale(1);    }
+    from { opacity: 0; transform: translateY(0.5rem) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0)     scale(1);    }
   }
   .animate-slide-in {
-    animation: slide-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: slide-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes pulse-subtle {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.03); }
+  }
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2.5s ease-in-out infinite;
   }
 }
