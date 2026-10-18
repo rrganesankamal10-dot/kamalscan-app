@@ -554,7 +554,7 @@ function App() {
   const [showSignatureModal, setShowSignatureModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [expandedCardOptionsId, setExpandedCardOptionsId] = useState(null)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : false)
 
   const handleApplyCollage = (collageDataUrl) => {
     const newItem = makeItem(collageDataUrl, `Collage-${Date.now()}.jpg`, 'image', estimateDataUrlSize(collageDataUrl))
@@ -1328,21 +1328,32 @@ function App() {
         queueCount={queue.length}
       />
 
-      {/* ─── Main Content Container (Padded left on desktop for fixed sidebar) ─── */}
-      <div className="lg:pl-72 flex-1 flex flex-col min-h-screen w-full pb-28">
+      {/* ─── Main Content Container (Padded left on desktop when sidebar open) ─── */}
+      <div className={`${isSidebarOpen ? 'lg:pl-72' : 'lg:pl-0'} flex-1 flex flex-col min-h-screen w-full pb-28 transition-all duration-300`}>
 
       {/* ─── Modern Workspace Top App Bar ───────────────────────────────── */}
         <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 py-3">
           <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
             
-            {/* Left: Mobile hamburger menu & branding */}
+            {/* Left: 3-Line Menu button & branding */}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setIsSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-xs cursor-pointer"
-                title="Open Navigation Menu"
+                onClick={() => {
+                  triggerHaptic('light')
+                  setIsSidebarOpen(!isSidebarOpen)
+                }}
+                className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 hover:border-sky-300 dark:hover:border-sky-700 shadow-xs transition-all cursor-pointer flex items-center gap-2 group active:scale-95"
+                title={isSidebarOpen ? 'Close Tools Sidebar' : 'Open Tools Sidebar'}
+                aria-label="Toggle Tools Navigation"
               >
-                <Menu size={20} />
+                <div className="flex flex-col justify-center gap-1 w-4 h-3.5">
+                  <span className="w-4 h-0.5 bg-slate-700 dark:bg-slate-200 rounded-full transition-all" />
+                  <span className="w-2.5 h-0.5 bg-sky-600 rounded-full group-hover:w-4 transition-all" />
+                  <span className="w-4 h-0.5 bg-slate-700 dark:bg-slate-200 rounded-full transition-all" />
+                </div>
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 hidden sm:inline">
+                  Tools
+                </span>
               </button>
 
               <div className="flex items-center gap-2.5">
