@@ -11,6 +11,7 @@ import Tesseract from 'tesseract.js'
 import { parseDocx, parsePptx, parsePlainText } from '../utils/documentParser'
 import { extractPdfSearchableText } from '../utils/pdfTools'
 import { generateNarrationWav, downloadAudioFile } from '../utils/audioExport'
+import { convertPptxToPdf } from '../utils/pptxConverter'
 import { triggerHaptic } from '../utils/haptics'
 
 // ─── AI Multi-Language Dubbing Languages & Client-Side Translator ───────────
@@ -562,6 +563,26 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
     }
   }
 
+  const handleConvertPptxToPdf = async () => {
+    try {
+      triggerHaptic('medium')
+      setSpeechStatus('Converting PPT slides to PDF document...')
+      const { blob, filename } = await convertPptxToPdf(file, file?.name || 'Presentation')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+      triggerHaptic('success')
+      setSpeechStatus('Converted PPTX to PDF successfully!')
+    } catch (err) {
+      alert('Could not convert PPT to PDF: ' + err.message)
+    }
+  }
+
   // ─── Search Functions ───────────────────────────────────────────────────────
   const handleExecuteSearch = async () => {
     if (!searchQuery.trim()) {
@@ -924,6 +945,19 @@ export function UniversalDocViewerModal({ initialFile, onClose, onImportToQueue 
             >
               <PenTool size={13} />
               <span className="hidden sm:inline">Edit in</span> Studio
+            </button>
+          )}
+
+          {/* Convert PPTX to PDF */}
+          {docType === 'pptx' && (
+            <button
+              onClick={handleConvertPptxToPdf}
+              disabled={loading}
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-98 cursor-pointer"
+              title="Convert this PowerPoint presentation to a PDF document"
+            >
+              <Download size={13} />
+              <span>Convert to PDF</span>
             </button>
           )}
 

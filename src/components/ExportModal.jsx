@@ -2,9 +2,10 @@ import React, { useState } from 'react'
 import {
   X, FileDown, Share2, Archive, Check, Sparkles, Layers,
   ShieldCheck, Sliders, Hash, Settings2, FileText, CheckCircle2,
-  ChevronRight, HardDrive, Smartphone, Send
+  ChevronRight, HardDrive, Smartphone, Send, Presentation
 } from 'lucide-react'
 import { triggerHaptic } from '../utils/haptics'
+import { convertPagesToPptx } from '../utils/pptxConverter'
 
 export function ExportModal({
   isOpen,
@@ -45,6 +46,24 @@ export function ExportModal({
   const handleZip = () => {
     triggerHaptic('light')
     onExportZip({ qualityPreset })
+  }
+
+  const handleExportPptx = async () => {
+    try {
+      triggerHaptic('medium')
+      const { blob, filename } = await convertPagesToPptx(queue, pdfFilename)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+      triggerHaptic('success')
+    } catch (err) {
+      alert('Error exporting PowerPoint presentation: ' + err.message)
+    }
   }
 
   return (
@@ -295,6 +314,17 @@ export function ExportModal({
               <span>{isExporting ? 'Exporting...' : 'Save PDF'}</span>
             </button>
           </div>
+
+          {/* Export to PowerPoint Presentation */}
+          <button
+            type="button"
+            onClick={handleExportPptx}
+            disabled={isExporting}
+            className="w-full py-2.5 px-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all active:scale-98 cursor-pointer"
+          >
+            <Presentation size={15} className="text-amber-600 dark:text-amber-400" />
+            <span>Export to PowerPoint (.pptx)</span>
+          </button>
 
           {/* Quick ZIP fallback */}
           <button

@@ -1516,8 +1516,8 @@ function App() {
               </button>
 
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-cyan-400 flex items-center justify-center text-white shadow-md shadow-sky-500/20">
-                  <FileText size={20} />
+                <div className="w-9 h-9 rounded-xl bg-white dark:bg-slate-850 p-1.5 flex items-center justify-center shadow-md border border-slate-200/80 dark:border-slate-800">
+                  <img src="/favicon.svg" alt="KamalScan" className="w-6 h-6 object-contain" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
