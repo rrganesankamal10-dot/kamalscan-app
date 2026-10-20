@@ -664,11 +664,66 @@ function App() {
           }
         }
         if (files.length > 0) {
-          // Open directly in distraction-free Fullscreen Study & Document Viewer!
           openInDocViewer(files[0])
           addToast(`Opened ${files[0].name} in Study Viewer!`)
         }
       })
+    }
+  }, [])
+
+  // ── Android Native Intent Listener (WhatsApp, Gmail, Drive "Open With") ──
+  useEffect(() => {
+    const handleIncomingAndroidFile = (fileDetail) => {
+      try {
+        if (!fileDetail || !fileDetail.base64) return
+        const byteCharacters = atob(fileDetail.base64)
+        const byteNumbers = new Array(byteCharacters.length)
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i)
+        }
+        const byteArray = new Uint8Array(byteNumbers)
+        const blob = new Blob([byteArray], { type: fileDetail.mimeType || 'application/pdf' })
+        const file = new File([blob], fileDetail.name || 'document.pdf', {
+          type: fileDetail.mimeType || 'application/pdf',
+          lastModified: Date.now()
+        })
+
+        // Open immediately in Study Viewer
+        openInDocViewer(file)
+        addToast(`Opened ${file.name} from WhatsApp/Storage!`, 'success')
+      } catch (err) {
+        console.error('Failed to parse incoming Android file:', err)
+        addToast('Could not load incoming file: ' + err.message, 'error')
+      }
+    }
+
+    const onEvent = (e) => {
+      if (e.detail) handleIncomingAndroidFile(e.detail)
+    }
+    window.addEventListener('kamalscan:androidFileOpen', onEvent)
+
+    const checkBridgeStartup = () => {
+      if (window.KamalScanAndroidBridge && typeof window.KamalScanAndroidBridge.getPendingFile === 'function') {
+        try {
+          const raw = window.KamalScanAndroidBridge.getPendingFile()
+          if (raw && raw.length > 5) {
+            const parsed = JSON.parse(raw)
+            handleIncomingAndroidFile(parsed)
+          }
+        } catch (e) {
+          console.warn('Error reading pending file from bridge:', e)
+        }
+      }
+    }
+
+    checkBridgeStartup()
+    const timer1 = setTimeout(checkBridgeStartup, 400)
+    const timer2 = setTimeout(checkBridgeStartup, 1000)
+
+    return () => {
+      window.removeEventListener('kamalscan:androidFileOpen', onEvent)
+      clearTimeout(timer1)
+      clearTimeout(timer2)
     }
   }, [])
 
